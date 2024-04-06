@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "n97fit"
+version = "1.0.0"
+license = {file = "LICENSE"}
+
+authors = [
+  {name = "Takakiyo Nakazawa"},
+]
+
+maintainers = [
+  {name = "Hisashi Yashio", email = "yashiro.hisashi@nies.go.jp"}
+]
+
+description = """
+ This is a program of data selection and curve fitting \
+ by a digital filtering technique including Reinsch-type cubic \
+ spline, Fourier harmonics and linear interpolation. It is to \
+ derive the fitted curve to the observed data ( CO2, d13C,..), \
+ as well as to separate the seasonal, short- and long-term \
+ variations from the data. \
+"""
+readme = "README.md"
+
+dependencies = [
+    "numpy",
+    "scipy>=1.10",
+    "pandas>=2.0,<3"
+]
+
+requires-python = ">=3.8"
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+]
+
+keywords = [""]
+
+[project.urls]
+#Homepage = ""
+#Documentation = ""
+#Repository = ""
+
+[project.scripts]
+n97fit = "n97fit:cli_main"
+
+[project.optional-dependencies]
+dev = [
+    "build"
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
