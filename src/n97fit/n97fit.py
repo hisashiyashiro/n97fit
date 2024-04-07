@@ -191,8 +191,13 @@ class N97Fit:
 
         # *** Stage 1 : END ***
 
+        if sw_iteration == 1:
+            itelim = 5
+        else:
+            itelim = 1
+
         temp_cnt = None
-        for iteration in range(0, 5):
+        for iteration in range(0, itelim):
             logger.info("")
             logger.info("* * * * * * * * * * * * * * * * * * * * * * * * * * * *")
             logger.info(
@@ -283,7 +288,7 @@ class N97Fit:
                     sgm_temp = sgm_hmsp
 
                 # *** Stage 2-3 : Judge the flags and re-allocate 2D data *** !
-                if sw_iteration == 0 or iteration >= 1:
+                if iteration >= 1:
                     logger.info("")
                     logger.info(" =>Skip Judgement in this Stage...")
                     break
@@ -538,44 +543,41 @@ class N97Fit:
 
             # *** Stage 3-4 : Judge the flags and re-allocate 2D data ***
 
-            if sw_iteration == 0:
-                logger.info("")
-                logger.info("  =>Skip Judgement in this Stage...")
-                break
-
             # if value is out of sigma*pl_sigma, set to 2
             sgm_allow = sgm_sphmlohi * pl_sigma
             sumcnt = 0
 
-            for i in range(0, ndata):
-                for j in range(0, ijdata[i]):
-                    ij = ijmap[i][j]
+            if sw_iteration == 1:
+                for i in range(0, ndata):
+                    for j in range(0, ijdata[i]):
+                        ij = ijmap[i][j]
 
-                    if flag[ij] >= 0:
-                        dev = de_sphmlohi[i]  # Judge by using averaged
-                        flag[ij], cnt = reviseflag(dev, flag[ij], sgm_allow)
-                        sumcnt += cnt
+                        if flag[ij] >= 0:
+                            dev = de_sphmlohi[i]  # Judge by using averaged
+                            flag[ij], cnt = reviseflag(dev, flag[ij], sgm_allow)
+                            sumcnt += cnt
 
-            logger.info("")
-            logger.info("  =>Reject data (sigma*%2d): %5d", pl_sigma, sumcnt)
-
-            reportrej(rawndata, rawymd, rawy, flag, 2)
-
-            if sumcnt == temp_cnt:
                 logger.info("")
-                logger.info("* * * * * * * * * * * * * * * * * * * * * * * * * * * *")
-                logger.info("* * *                 END FITTING                 * * *")
-                logger.info("* * * * * * * * * * * * * * * * * * * * * * * * * * * *")
-                break
+                logger.info("  =>Reject data (sigma*%2d): %5d", pl_sigma, sumcnt)
 
-            # Re-Allocate 2D Array (reject flag 1 and 2)
-            ndata, dt, d, t, y, ysdev, ijdata, ijmap = ijmapping(
-                pl_avgday, rawt, rawd, rawy, flag, asarray=True
-            )
+                reportrej(rawndata, rawymd, rawy, flag, 2)
 
-            logger.info("")
-            logger.info("  =====> BACK TO STAGE 2 =====> ")
-            temp_cnt = sumcnt
+                if sumcnt == temp_cnt:
+                    break
+
+                # Re-Allocate 2D Array (reject flag 1 and 2)
+                ndata, dt, d, t, y, ysdev, ijdata, ijmap = ijmapping(
+                    pl_avgday, rawt, rawd, rawy, flag, asarray=True
+                )
+
+                logger.info("")
+                logger.info("  =====> BACK TO STAGE 2 =====> ")
+                temp_cnt = sumcnt
+
+        logger.info("")
+        logger.info("* * * * * * * * * * * * * * * * * * * * * * * * * * * *")
+        logger.info("* * *                 END FITTING                 * * *")
+        logger.info("* * * * * * * * * * * * * * * * * * * * * * * * * * * *")
 
         # *** Stage 3 : END ***
 
@@ -584,6 +586,25 @@ class N97Fit:
         t_tt = matching(rawndata, rawt, xdata, x_t, x_tt, self.day_interval)
         t_tr = matching(rawndata, rawt, xdata, x_t, x_tr, self.day_interval)
         t_ss = matching(rawndata, rawt, xdata, x_t, x_ss, self.day_interval)
+
+        if sw_iteration == 0:
+            dev       = rawy - t_tt
+            sgm_all   = np.std(dev)
+            sgm_allow = sgm_all * pl_sigma
+
+            logger.info("")
+            logger.info("  +Sigma(Y -total) = %12.7E", sgm_all)
+
+            for ij in range(0, rawndata):
+                if flag[ij] >= 0:
+                    flag[ij], cnt = reviseflag(dev[ij], flag[ij], sgm_allow)
+                    sumcnt += cnt
+
+            logger.info("")
+            logger.info("  =>Reject data (sigma*%2d): %5d", pl_sigma, sumcnt)
+
+            reportrej(rawndata, rawymd, rawy, flag, 2)
+            logger.info("")
 
         self.syear = syear
         self.trange = (tstart, tend + 1)
