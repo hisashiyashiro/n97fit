@@ -703,8 +703,15 @@ class N97Fit:
 
         # convert date to continuous year
         data["t"] = data["d"].apply(
-            lambda x: (x - date2cday(sdate)) / self.days_in_year,
+            lambda x: ( float( x - date2cday(sdate) ) + 0.5 ) / float( self.days_in_year )
         )
+
+        # convert date to continuous year (exact calculation)
+#         data["t"] = data["date"].apply(
+#             lambda x: float( ( date(x.year,x.month,x.day) - date(x.year,1,1) ).days + 0.5 ) # assume 12:00
+#                     / float( ( date(x.year+1,1,1)         - date(x.year,1,1) ).days )
+#                     + float( x.year - syear )
+#         )
 
         # stop if reverse in time is found
         dt = data["t"].diff()
