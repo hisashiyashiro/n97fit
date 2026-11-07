@@ -71,6 +71,26 @@ We would like to thank Prof. Shinji Morimoto and the staff and students of the C
 
 ## 2026-11-07
 
+- Version 1.1.1
+- Support pandas 3. The supported versions are python 3.8-3.14,
+  numpy 1.21-2.x, scipy 1.10-1.x and pandas 2.0-3.x.
+- Speed up fit() further (about 3x faster than 1.1.0) and the writing
+  of the output files (about 2x faster).
+- Better precision (the results change by 1e-6 or less in the output
+  files):
+    - The smoothing spline is solved by the Reinsch algorithm with the
+      mean subtracted. The rounding error is about 50 times smaller at
+      the data points and 30 times smaller far outside the data.
+    - The means of each day group are computed by Kahan summation in
+      the order of the data, which pandas 3 does not use.
+    - The results agree within 1e-8 among the supported versions of
+      numpy, scipy and pandas. Before, the growth rate differed by up
+      to 3e-3 near both ends of the 1-day grid.
+- The output files have the same layout with all pandas versions.
+  pandas 2.0.0-2.0.2 put an extra space before string columns.
+
+## 2026-11-07
+
 - Version 1.1.0
 - Speed up fit() by vectorizing the main loops (about 5x faster).
   This part does not change the results.
