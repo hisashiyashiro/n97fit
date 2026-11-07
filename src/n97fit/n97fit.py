@@ -953,8 +953,8 @@ class N97Fit:
                 "mn": mn,
                 "ave_fit": ym_group["smooth"].mean(),
                 "stdev_fit": ym_group["smooth"].std(ddof=0),
-                "ave_trend": ym_group["seasonal"].mean(),
-                "stdev_trend": ym_group["seasonal"].std(ddof=0),
+                "ave_seasonal": ym_group["seasonal"].mean(),
+                "stdev_seasonal": ym_group["seasonal"].std(ddof=0),
             },
         )
 
@@ -984,8 +984,8 @@ class N97Fit:
                 "mn": mn_group.groups.keys(),
                 "ave_fit": mn_group["smooth"].mean(),
                 "stdev_fit": mn_group["smooth"].std(ddof=0),
-                "ave_trend": mn_group["seasonal"].mean(),
-                "stdev_trend": mn_group["seasonal"].std(ddof=0),
+                "ave_seasonal": mn_group["seasonal"].mean(),
+                "stdev_seasonal": mn_group["seasonal"].std(ddof=0),
             },
         )
         df["period"] = df["period"].convert_dtypes()
