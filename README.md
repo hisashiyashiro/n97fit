@@ -28,9 +28,9 @@ We would like to thank Prof. Shinji Morimoto and the staff and students of the C
 ## Prerequisites
 
 - python >= 3.8
-- numpy
-- scipy
-- pandas
+- numpy >= 1.21, < 3
+- scipy >= 1.10, < 2
+- pandas >= 2.0, < 4
 
 ## Running as a module
 
