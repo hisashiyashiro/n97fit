@@ -43,9 +43,9 @@ class N97Fit:
     trange: tuple
     nh: int
     hm_coef: np.ndarray
-    raw_data: pd.DataFrame
-    eff_data: pd.DataFrame
-    fit_result: pd.DataFrame
+    raw_data: pd.DataFrame = None
+    eff_data: pd.DataFrame = None
+    fit_result: pd.DataFrame = None
 
     extrap_days: int = 30
     day_interval: float = 0.0027
