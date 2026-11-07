@@ -67,6 +67,70 @@ We would like to thank Prof. Shinji Morimoto and the staff and students of the C
 - fit\_onemonth.txt   : Fitting results, one harmonics
 - fit\_period.txt     : Fitting results, mean of the whole period
 
+## Uncertainty by bootstrap
+
+The uncertainty of the fitting results is estimated by bootstrap: the
+data are thinned out at random and fitted again, many times.
+
+    $> python -m n97fit [input_file] [config_file] [output_dir] --bootstrap
+
+    --bootstrap       : Estimate the uncertainty by bootstrap
+    --nboot N         : Number of bootstrap members (default: 1000)
+    --exclude-frac F  : Fraction of the data excluded in each member,
+                        0 < F < 1 (default: 0.5)
+    --seed S          : Random seed (default: 0)
+
+or in python:
+
+    nf = n97fit.N97Fit()
+    nf.fit(data)
+    nf.bootstrap()      # nboot=1000, exclude_frac=0.5, seed=0
+    nf.boot_all()       # fitting results with the uncertainty
+    nf.boot_annual()    # annual values with the uncertainty
+
+Outputs (with --bootstrap):
+
+- boot\_all.txt    : Fitting results (smooth curve, trend and growth
+                     rate) and their standard deviations (stdev)
+- boot\_annual.txt : Annual mean and growth rate of the trend, and
+                     their stdev
+
+Method:
+
+- The unit of thinning is the "Range of day" group (the day with
+  avgday=1) of the data with flag 0. In each member, a fraction f of
+  the units are excluded at random, and the data are fitted with the
+  same parameters, including the rejection of outliers.
+- The smooth curve, the trend and the growth rate of each member are
+  taken in the range of fit\_all.txt (the data period +- 30 days). The
+  members that cover each day are counted in the column nboot.
+- The stdev over the members is multiplied by sqrt((1-f)/f), the factor
+  of the delete-d jackknife (Shao and Wu, 1989). The corrected stdev is
+  nearly independent of f, and the factor is 1 at f=0.5. f is the
+  actual fraction of the excluded units, round(F x units) / units.
+- boot\_all.txt:
+    - value, trend, growthrate: same as fit\_all.txt
+    - stdev\_value, stdev\_trend, stdev\_growthrate: stdev of them.
+      stdev\_growthrate is from the growth rate of each member, because
+      the errors of the trend on successive days are highly correlated.
+    - ensmean\_trend: mean of the trend over the members
+- boot\_annual.txt (the years fully in the range):
+    - ave\_trend: mean of the trend in the year (same as fit\_annual.txt)
+    - ave\_gr: trend(Jan 1 of the next year) - trend(Jan 1)
+    - stdev\_trend, stdev\_gr: stdev of them, from the annual values of
+      each member. The members that do not cover the whole year are
+      not used.
+- Notes:
+    - Each unit is excluded independently, so the correlation of the
+      data in time is not considered. The stdev can be underestimated
+      for strongly correlated data.
+    - The stdev is large near both ends of the period and where the
+      data are sparse. ensmean\_trend differs from the trend with all
+      data there.
+    - It takes about 35 seconds for 1000 members with 1265 days of data.
+
+Shao, J. and Wu, C. F. J. (1989), A general theory for jackknife variance estimation. Ann. Statist., 17(3): 1176-1197.
+
 # Release Notes
 
 ## 2026-11-07

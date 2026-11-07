@@ -44,6 +44,18 @@ def readcfg(file, nrows: int = None) -> List:
     return conf["value"].values.tolist()
 
 
+def exclude_frac_type(s: str):
+    import argparse
+
+    try:
+        f = float(s)
+    except ValueError:
+        f = None
+    if f is None or not 0.0 < f < 1.0:
+        raise argparse.ArgumentTypeError("must be 0 < f < 1")
+    return f
+
+
 def getargs():
     import argparse
 
@@ -54,13 +66,41 @@ def getargs():
     parser.add_argument("input", type=Path, help="input data file")
     parser.add_argument("config", type=Path, help="config file")
     parser.add_argument("outdir", type=Path, help="output directory")
+    parser.add_argument(
+        "--bootstrap",
+        action="store_true",
+        help="estimate the uncertainty by bootstrap",
+    )
+    parser.add_argument(
+        "--nboot",
+        type=int,
+        default=1000,
+        help="number of bootstrap members (default: 1000)",
+    )
+    parser.add_argument(
+        "--exclude-frac",
+        type=exclude_frac_type,
+        default=0.5,
+        help="fraction of the data excluded in each bootstrap member,"
+        " 0 < f < 1 (default: 0.5)",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="random seed of bootstrap (default: 0)",
+    )
     args, _ = parser.parse_known_args()
 
-    return args.input, args.config, args.outdir
+    if args.nboot < 2:
+        parser.error("--nboot must be 2 or more")
+
+    return args
 
 
 def cli_main():
-    input, config, outdir = getargs()
+    args = getargs()
+    input, config, outdir = args.input, args.config, args.outdir
 
     [avgday, sigma, outday, nhm, cutlo, orderlo, orderhi, sw_iteration] = readcfg(
         file=config, nrows=8
@@ -83,6 +123,12 @@ def cli_main():
 
     # exec fitting
     n97fit.fit(data)
+
+    # exec bootstrap
+    if args.bootstrap:
+        n97fit.bootstrap(
+            nboot=args.nboot, exclude_frac=args.exclude_frac, seed=args.seed
+        )
 
     # fetch results
     all_data = n97fit.data_all()
@@ -185,6 +231,22 @@ def cli_main():
         format={"period": "%10s"},
         float_format="%13.7f",
     )
+
+    if args.bootstrap:
+        write_fixedformat(
+            n97fit.boot_all(interval=outday),
+            Path(outdir, "boot_all.txt"),
+            format={"year": "%9.5f", "nboot": "%6d"},
+            float_format="%13.7f",
+            date_format="%(excel)7d",
+        )
+
+        write_fixedformat(
+            n97fit.boot_annual(),
+            Path(outdir, "boot_annual.txt"),
+            format={"year": "%4d"},
+            float_format="%13.7f",
+        )
 
     logger.info("")
     logger.info(" ************** E N D ***************")
