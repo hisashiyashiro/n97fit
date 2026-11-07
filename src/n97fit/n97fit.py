@@ -975,7 +975,7 @@ class N97Fit:
 
         fit_all["mn"] = fit_all["date"].apply(lambda x: x.month)
 
-        mn_group = fit_all.groupby(["mn"])
+        mn_group = fit_all.groupby("mn")
         eyear = fit_all["date"].max().year
 
         df = pd.DataFrame(
