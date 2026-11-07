@@ -1,25 +1,25 @@
-import math
 import numpy as np
 
 
-def harmonic(ti: float, a: np.ndarray, nh: int) -> float:
+def harmonic(ti, a: np.ndarray, nh: int):
     """calculate the seasonal cycle
 
     Args:
-        ti (float): time
+        ti (float or np.ndarray): time
         a (np.ndarray): coefficients
         nh (int): number of harmonics
 
     Returns:
-        float: seasonal cycle
+        float or np.ndarray: seasonal cycle
     """
 
-    ys = 0.0
+    ti = np.asarray(ti, dtype=np.float64)
+    ys = np.zeros_like(ti)
 
     for i in range(0, nh):
         if i % 2 == 0:
-            ys += a[i] * math.sin(math.pi * ti * float(i + 2))
+            ys += a[i] * np.sin(np.pi * ti * float(i + 2))
         else:
-            ys += a[i] * math.cos(math.pi * ti * float(i + 1))
+            ys += a[i] * np.cos(np.pi * ti * float(i + 1))
 
-    return ys
+    return ys if ys.ndim else float(ys)

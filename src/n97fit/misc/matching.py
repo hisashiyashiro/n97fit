@@ -6,6 +6,9 @@ def matching(
 ) -> np.ndarray:
     """matching x1 to x2 and return y1
 
+    For each x1, the last x2 within dx is used (x1 and x2 must be sorted).
+    Unmatched points are set to 0.
+
     Args:
         n1 (int): length of x1
         x1 (np.ndarray): x1
@@ -18,23 +21,14 @@ def matching(
         np.ndarray: y1
     """
 
-    def matching_index(x, start):
-        m = np.argwhere(np.abs(x - x2[start:n2]) <= dx)
-        if m.size != 0:
-            return m.max() + start
-        else:
-            return -1
+    x1 = np.asarray(x1)
+    x2 = np.asarray(x2)[:n2]
 
     y1 = np.zeros_like(x1)
 
-    j = 0
-    for i in range(0, n1):
-        j = matching_index(x1[i], j)
-
-        if j != -1:
-            y1[i] = y2[j]
-        else:
-            # マッチしなかった場合は0から再検索
-            j = 0
+    # last index of x2 with x2 <= x1 + dx
+    k = np.searchsorted(x2, x1[:n1] + dx, side="right") - 1
+    ok = (k >= 0) & (np.abs(x1[:n1] - x2[np.clip(k, 0, None)]) <= dx)
+    y1[:n1][ok] = np.asarray(y2)[k[ok]]
 
     return y1

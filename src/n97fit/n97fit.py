@@ -164,13 +164,16 @@ class N97Fit:
         tend = 0
 
         sdate = date2cday(date(syear, 1, 1))
-        for i in range(0, xdata):
-            x_d[i] = i + xstart
-            x_t[i] = float(x_d[i] - sdate) / self.days_in_year
-            if abs(x_t[i] - t[0]) <= self.day_interval:
-                tstart = i
-            if abs(x_t[i] - t[ndata - 1]) <= self.day_interval:
-                tend = i
+        x_d[:] = np.arange(xstart, xend + 1)
+        x_t[:] = (x_d - sdate).astype(np.float64) / self.days_in_year
+
+        # last grid point within day_interval
+        idx = np.nonzero(np.abs(x_t - t[0]) <= self.day_interval)[0]
+        if idx.size:
+            tstart = idx[-1]
+        idx = np.nonzero(np.abs(x_t - t[ndata - 1]) <= self.day_interval)[0]
+        if idx.size:
+            tend = idx[-1]
 
         logger.info("")
         logger.info("***Prepare ideal wave (1-day resolution)***")
@@ -234,12 +237,8 @@ class N97Fit:
                 for i in range(0, nh):
                     logger.info("  %s %10.4E", label[i], hm_coef[i])
 
-                t_ln = np.zeros(ndata, dtype=np.float64)
-                t_hm = np.zeros(ndata, dtype=np.float64)
-
-                for i in range(0, ndata):
-                    t_ln[i] = linea * t[i] + lineb
-                    t_hm[i] = harmonic(t[i], hm_coef, nh)
+                t_ln = linea * t + lineb
+                t_hm = harmonic(t, hm_coef, nh)
 
                 # Calc deviation (y - harmonic - linear)
                 de_hm = y - t_hm
@@ -268,11 +267,8 @@ class N97Fit:
                     de_sp = y - t_sp
 
                     # Re-calc fourier coefficient from detrend
-                    t_hm = np.zeros(ndata, dtype=np.float64)
-
                     hm_coef = frcoef(ndata, t, de_sp, nh, nterm)
-                    for i in range(0, ndata):
-                        t_hm[i] = harmonic(t[i], hm_coef, nh)
+                    t_hm = harmonic(t, hm_coef, nh)
 
                     # Calc deviation (y - new harmonic - spline)
                     de_hm = y - t_hm
@@ -407,6 +403,9 @@ class N97Fit:
 
             x_q = np.zeros(xdata, dtype=np.float64)
 
+            # first grid index with x_t > p - day_interval (for Q -> X mapping)
+            pfirst = np.searchsorted(x_t, p[:pdata] - self.day_interval, side="right")
+
             for ite_i in range(0, 2):
                 if ite_i == 0:
                     logger.info("")
@@ -427,13 +426,17 @@ class N97Fit:
                     searchi = 0
 
                     for i in range(1, pdata):
+                        if searchi >= xdata:
+                            break
                         aa = (q[i] - q[i - 1]) / (p[i] - p[i - 1])
                         bb = q[i] - aa * p[i]
 
-                        for j in range(searchi, xdata):
-                            x_q[j] = aa * x_t[j] + bb
-                            if abs(x_t[j] - p[i]) < self.day_interval:
-                                break
+                        # fill up to the first grid point within day_interval
+                        # of p[i] (to the end of the grid if not found)
+                        j = max(int(pfirst[i]), searchi)
+                        if j >= xdata or not abs(x_t[j] - p[i]) < self.day_interval:
+                            j = xdata - 1
+                        x_q[searchi : j + 1] = aa * x_t[searchi : j + 1] + bb
                         searchi = j + 1
 
                     # Low path filter
@@ -447,10 +450,7 @@ class N97Fit:
                         # Smooth seasonal cycle with high path filter
                         hm_coef = frcoef(ndata, t, de_splo, nh, nterm)
 
-                        x_hm = np.zeros(xdata, dtype=np.float64)
-
-                        for i in range(0, xdata):
-                            x_hm[i] = harmonic(x_t[i], hm_coef, nh)
+                        x_hm = harmonic(x_t, hm_coef, nh)
 
                         x_hm_hi = signal.sosfiltfilt(bwf_sos2, x_hm, padtype=None)
 
@@ -458,15 +458,13 @@ class N97Fit:
                         trim_x_hm_hi = np.zeros(xdata, dtype=np.float64)
                         j = 0 - 1
 
-                        for i in range(tstart, tend + 1, 3):
-                            j += 1
-                            trim_x_t[j] = x_t[i]
-                            trim_x_hm_hi[j] = x_hm_hi[i]
+                        ntrim = len(range(tstart, tend + 1, 3))
+                        trim_x_t[:ntrim] = x_t[tstart : tend + 1 : 3]
+                        trim_x_hm_hi[:ntrim] = x_hm_hi[tstart : tend + 1 : 3]
 
                         hm_coef = frcoef(ndata, trim_x_t, trim_x_hm_hi, nh, nterm)
 
-                        for i in range(0, ndata):
-                            t_hm[i] = harmonic(t[i], hm_coef, nh)
+                        t_hm = harmonic(t, hm_coef, nh)
 
                         # Sum deviation (y -sp -hm(new) -longterm)
                         de_sphm = de_sp - t_hm
@@ -481,22 +479,19 @@ class N97Fit:
                         # Replace Q wave by Real wave (new Y-sp-hm)
                         q_de_sphm = matching(pdata, p, ndata, t, de_sphm, self.day_interval)
 
-                        for i in range(0, pdata):
-                            if r[i] == 1:
-                                q[i] = q_de_sphm[i]
+                        m = r[:pdata] == 1
+                        q[:pdata][m] = q_de_sphm[:pdata][m]
 
                         sgm_temp = sgm_sphmlo
 
                         if judge == 1 or ite_j == 9:
                             # Remove longterm trend from Q wave (Real+Ideal)
-                            for i in range(0, pdata):
-                                q[i] = q[i] - q_lo[i]
+                            q[:pdata] -= q_lo[:pdata]
                             break
 
                         # Replace Q wave by Ideal longterm trend
-                        for i in range(0, pdata):
-                            if r[i] == 0:
-                                q[i] = q_lo[i]
+                        m = r[:pdata] == 0
+                        q[:pdata][m] = q_lo[:pdata][m]
 
                     # High path filter
                     if ite_i == 1:
@@ -522,14 +517,12 @@ class N97Fit:
                             break
 
                         # Replace Q wave by Ideal shortterm trend
-                        for i in range(0, pdata):
-                            if r[i] == 0:
-                                q[i] = q_hi[i]
+                        m = r[:pdata] == 0
+                        q[:pdata][m] = q_hi[:pdata][m]
 
                     # end if
 
-            for i in range(0, xdata):
-                x_hm[i] = harmonic(x_t[i], hm_coef, nh)
+            x_hm = harmonic(x_t, hm_coef, nh)
 
             logger.info("")
             logger.info("  +COEFFICIENTS A(K)=")
@@ -667,10 +660,7 @@ class N97Fit:
                 "harmonics": x_hm,
                 "shortterm": x_hi,
                 "growthrate": dtrdtt(x_tr, x_t),
-                "date": np.array(
-                    [cday2date(cd) for cd in x_d],
-                    dtype="datetime64[D]",
-                ),
+                "date": np.datetime64("1899-12-30", "D") + x_d,
             },
         )
 
@@ -692,19 +682,18 @@ class N97Fit:
         sdate = date(syear, 1, 1)
 
         # convert date to YYYYMMDD
-        data["ymd"] = (
-            data["date"].apply(lambda x: x.year * 10000 + x.month * 100 + x.day).astype(int)
-        )
+        dts = data["date"].dt
+        data["ymd"] = (dts.year * 10000 + dts.month * 100 + dts.day).astype(int)
 
-        # convert date to continuous day
-        data["d"] = data["date"].apply(
-            lambda x: date2cday(x),
-        )
+        # convert date to continuous day (serial day of MS Excel, see date2cday)
+        data["d"] = (
+            data["date"].values.astype("datetime64[D]") - np.datetime64("1899-12-30", "D")
+        ).astype(np.int64)
 
         # convert date to continuous year
-        data["t"] = data["d"].apply(
-            lambda x: ( float( x - date2cday(sdate) ) + 0.5 ) / float( self.days_in_year )
-        )
+        data["t"] = (
+            (data["d"] - date2cday(sdate)).astype(np.float64) + 0.5
+        ) / float(self.days_in_year)
 
         # convert date to continuous year (exact calculation)
 #         data["t"] = data["date"].apply(
@@ -1042,7 +1031,7 @@ class N97Fit:
         hm_range = range(int(self.days_in_year) + 1)
 
         hm_t = np.array([float(i) / self.days_in_year for i in hm_range])
-        hm_hm = np.array([harmonic(hm_t[i], self.hm_coef, self.nh) for i in hm_range])
+        hm_hm = harmonic(hm_t, self.hm_coef, self.nh)
 
         hm_t = np.append(hm_t, 1.0)
         hm_hm = np.append(hm_hm, harmonic(0.0, self.hm_coef, self.nh))
