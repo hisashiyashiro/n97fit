@@ -582,7 +582,7 @@ class N97Fit:
 
         if sw_iteration == 0:
             dev       = rawy - t_tt
-            sgm_all   = np.std(dev)
+            sgm_all   = np.std(dev[flag == 0])
             sgm_allow = sgm_all * pl_sigma
 
             logger.info("")
