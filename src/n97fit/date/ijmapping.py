@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 
 from ..io import logger
+from ..misc import groupmean
 
 
 def ijmapping(
@@ -50,14 +51,16 @@ def ijmapping(
     # [Range of day] ごとにgroupbyするためのインデックスを作成
     data["d_group"] = (data["d"].values - data["d"].min()) // avgday
 
-    group = data[data["qf"] == 0].groupby("d_group")
+    effdata = data[data["qf"] == 0]
+    group = effdata.groupby("d_group")
+    mean = groupmean(effdata, "d_group", ["d", "t", "y"])
 
     # [Range of day] ごとの平均値を計算
     avgdata = pd.DataFrame(
         {
-            "d": group["d"].mean().astype(int),
-            "t": group["t"].mean(),
-            "y": group["y"].mean(),
+            "d": mean["d"].astype(int),
+            "t": mean["t"],
+            "y": mean["y"],
             "ysdev": group["y"].std(ddof=0),
             "ijdata": group.size(),
             "ijmap": pd.Series({k: v.to_list() for k, v in group.groups.items()}),
