@@ -8,7 +8,7 @@ from scipy import signal
 
 from .date import ijmapping, date2cday, cday2date
 from .io import logger, reportrej
-from .misc import reviseflag, matching, groupmean
+from .misc import reviseflag, matching, groupmean, FiltFilt
 from .harmonics import frcoef, harmonic, smooth
 
 
@@ -394,6 +394,9 @@ class N97Fit:
                 pl_orderhi, 12.0 / cuthi, btype="low", output="sos", fs=fs
             )
 
+            filt_lo = FiltFilt(bwf_sos1)
+            filt_hi = FiltFilt(bwf_sos2)
+
             logger.info("")
             logger.info(" Low path filter result")
             logger.info(" +Cutoff month        : %3d", int(cutlo))
@@ -447,7 +450,7 @@ class N97Fit:
 
                     # Low path filter
                     if ite_i == 0:
-                        x_lo = signal.sosfiltfilt(bwf_sos1, x_q, padtype=None)
+                        x_lo = filt_lo(x_q)
 
                         t_lo = matching(ndata, t, xdata, x_t, x_lo, self.day_interval)
                         q_lo = matching(pdata, p, xdata, x_t, x_lo, self.day_interval)
@@ -458,7 +461,7 @@ class N97Fit:
 
                         x_hm = harmonic(x_t, hm_coef, nh)
 
-                        x_hm_hi = signal.sosfiltfilt(bwf_sos2, x_hm, padtype=None)
+                        x_hm_hi = filt_hi(x_hm)
 
                         trim_x_t = np.zeros(xdata, dtype=np.float64)
                         trim_x_hm_hi = np.zeros(xdata, dtype=np.float64)
@@ -501,7 +504,7 @@ class N97Fit:
 
                     # High path filter
                     if ite_i == 1:
-                        x_hi = signal.sosfiltfilt(bwf_sos2, x_q, padtype=None)
+                        x_hi = filt_hi(x_q)
 
                         t_hi = matching(ndata, t, xdata, x_t, x_hi, self.day_interval)
                         q_hi = matching(pdata, p, xdata, x_t, x_hi, self.day_interval)
