@@ -234,12 +234,8 @@ class N97Fit:
                 for i in range(0, nh):
                     logger.info("  %s %10.4E", label[i], hm_coef[i])
 
-                t_ln = np.zeros(ndata, dtype=np.float64)
-                t_hm = np.zeros(ndata, dtype=np.float64)
-
-                for i in range(0, ndata):
-                    t_ln[i] = linea * t[i] + lineb
-                    t_hm[i] = harmonic(t[i], hm_coef, nh)
+                t_ln = linea * t + lineb
+                t_hm = harmonic(t, hm_coef, nh)
 
                 # Calc deviation (y - harmonic - linear)
                 de_hm = y - t_hm
@@ -268,11 +264,8 @@ class N97Fit:
                     de_sp = y - t_sp
 
                     # Re-calc fourier coefficient from detrend
-                    t_hm = np.zeros(ndata, dtype=np.float64)
-
                     hm_coef = frcoef(ndata, t, de_sp, nh, nterm)
-                    for i in range(0, ndata):
-                        t_hm[i] = harmonic(t[i], hm_coef, nh)
+                    t_hm = harmonic(t, hm_coef, nh)
 
                     # Calc deviation (y - new harmonic - spline)
                     de_hm = y - t_hm
@@ -447,10 +440,7 @@ class N97Fit:
                         # Smooth seasonal cycle with high path filter
                         hm_coef = frcoef(ndata, t, de_splo, nh, nterm)
 
-                        x_hm = np.zeros(xdata, dtype=np.float64)
-
-                        for i in range(0, xdata):
-                            x_hm[i] = harmonic(x_t[i], hm_coef, nh)
+                        x_hm = harmonic(x_t, hm_coef, nh)
 
                         x_hm_hi = signal.sosfiltfilt(bwf_sos2, x_hm, padtype=None)
 
@@ -465,8 +455,7 @@ class N97Fit:
 
                         hm_coef = frcoef(ndata, trim_x_t, trim_x_hm_hi, nh, nterm)
 
-                        for i in range(0, ndata):
-                            t_hm[i] = harmonic(t[i], hm_coef, nh)
+                        t_hm = harmonic(t, hm_coef, nh)
 
                         # Sum deviation (y -sp -hm(new) -longterm)
                         de_sphm = de_sp - t_hm
@@ -528,8 +517,7 @@ class N97Fit:
 
                     # end if
 
-            for i in range(0, xdata):
-                x_hm[i] = harmonic(x_t[i], hm_coef, nh)
+            x_hm = harmonic(x_t, hm_coef, nh)
 
             logger.info("")
             logger.info("  +COEFFICIENTS A(K)=")
@@ -1042,7 +1030,7 @@ class N97Fit:
         hm_range = range(int(self.days_in_year) + 1)
 
         hm_t = np.array([float(i) / self.days_in_year for i in hm_range])
-        hm_hm = np.array([harmonic(hm_t[i], self.hm_coef, self.nh) for i in hm_range])
+        hm_hm = harmonic(hm_t, self.hm_coef, self.nh)
 
         hm_t = np.append(hm_t, 1.0)
         hm_hm = np.append(hm_hm, harmonic(0.0, self.hm_coef, self.nh))
