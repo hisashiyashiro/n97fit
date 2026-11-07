@@ -403,6 +403,9 @@ class N97Fit:
 
             x_q = np.zeros(xdata, dtype=np.float64)
 
+            # first grid index with x_t > p - day_interval (for Q -> X mapping)
+            pfirst = np.searchsorted(x_t, p[:pdata] - self.day_interval, side="right")
+
             for ite_i in range(0, 2):
                 if ite_i == 0:
                     logger.info("")
@@ -423,13 +426,17 @@ class N97Fit:
                     searchi = 0
 
                     for i in range(1, pdata):
+                        if searchi >= xdata:
+                            break
                         aa = (q[i] - q[i - 1]) / (p[i] - p[i - 1])
                         bb = q[i] - aa * p[i]
 
-                        for j in range(searchi, xdata):
-                            x_q[j] = aa * x_t[j] + bb
-                            if abs(x_t[j] - p[i]) < self.day_interval:
-                                break
+                        # fill up to the first grid point within day_interval
+                        # of p[i] (to the end of the grid if not found)
+                        j = max(int(pfirst[i]), searchi)
+                        if j >= xdata or not abs(x_t[j] - p[i]) < self.day_interval:
+                            j = xdata - 1
+                        x_q[searchi : j + 1] = aa * x_t[searchi : j + 1] + bb
                         searchi = j + 1
 
                     # Low path filter
@@ -451,10 +458,9 @@ class N97Fit:
                         trim_x_hm_hi = np.zeros(xdata, dtype=np.float64)
                         j = 0 - 1
 
-                        for i in range(tstart, tend + 1, 3):
-                            j += 1
-                            trim_x_t[j] = x_t[i]
-                            trim_x_hm_hi[j] = x_hm_hi[i]
+                        ntrim = len(range(tstart, tend + 1, 3))
+                        trim_x_t[:ntrim] = x_t[tstart : tend + 1 : 3]
+                        trim_x_hm_hi[:ntrim] = x_hm_hi[tstart : tend + 1 : 3]
 
                         hm_coef = frcoef(ndata, trim_x_t, trim_x_hm_hi, nh, nterm)
 
@@ -473,22 +479,19 @@ class N97Fit:
                         # Replace Q wave by Real wave (new Y-sp-hm)
                         q_de_sphm = matching(pdata, p, ndata, t, de_sphm, self.day_interval)
 
-                        for i in range(0, pdata):
-                            if r[i] == 1:
-                                q[i] = q_de_sphm[i]
+                        m = r[:pdata] == 1
+                        q[:pdata][m] = q_de_sphm[:pdata][m]
 
                         sgm_temp = sgm_sphmlo
 
                         if judge == 1 or ite_j == 9:
                             # Remove longterm trend from Q wave (Real+Ideal)
-                            for i in range(0, pdata):
-                                q[i] = q[i] - q_lo[i]
+                            q[:pdata] -= q_lo[:pdata]
                             break
 
                         # Replace Q wave by Ideal longterm trend
-                        for i in range(0, pdata):
-                            if r[i] == 0:
-                                q[i] = q_lo[i]
+                        m = r[:pdata] == 0
+                        q[:pdata][m] = q_lo[:pdata][m]
 
                     # High path filter
                     if ite_i == 1:
@@ -514,9 +517,8 @@ class N97Fit:
                             break
 
                         # Replace Q wave by Ideal shortterm trend
-                        for i in range(0, pdata):
-                            if r[i] == 0:
-                                q[i] = q_hi[i]
+                        m = r[:pdata] == 0
+                        q[:pdata][m] = q_hi[:pdata][m]
 
                     # end if
 
