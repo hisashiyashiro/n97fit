@@ -1,6 +1,8 @@
 from typing import Union
 from datetime import date
 from math import nan as NaN
+import time
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -9,6 +11,8 @@ from scipy import signal
 from .date import ijmapping, flatten_ijmap, date2cday
 from .io import logger, reportrej
 from .misc import reviseflags, matching, groupmean, FiltFilt
+from .misc import make_rng, jackknife_scale, check_exclude_frac, exclude_units
+from .misc.groupmean import group_mean
 from .harmonics import frcoef, harmonic, smooth
 
 
@@ -46,6 +50,12 @@ class N97Fit:
     raw_data: pd.DataFrame = None
     eff_data: pd.DataFrame = None
     fit_result: pd.DataFrame = None
+    input_data: pd.DataFrame = None
+    boot_result: pd.DataFrame = None
+    boot_smooth: np.ndarray = None
+    boot_trend: np.ndarray = None
+    boot_growthrate: np.ndarray = None
+    boot_info: dict = None
 
     extrap_days: int = 30
     day_interval: float = 0.0027
@@ -643,7 +653,196 @@ class N97Fit:
             },
         )
 
+        # input data for bootstrap(); the results of the last bootstrap
+        # are for the previous data
+        self.input_data = data
+        self.boot_result = None
+        self.boot_smooth = None
+        self.boot_trend = None
+        self.boot_growthrate = None
+        self.boot_info = None
+
         return self.fit_result
+
+    def bootstrap(
+        self,
+        nboot: int = 1000,
+        exclude_frac: float = 0.5,
+        seed: int = 0,
+    ) -> pd.DataFrame:
+        """Uncertainty of the fitting result by bootstrap
+
+        The data are thinned out at random and fitted again, nboot times.
+        The unit of thinning is the "Range of day" group (the day with
+        avgday=1) of the effective data. In each member, a fraction
+        exclude_frac of the units (round(exclude_frac * number of units))
+        are excluded (flag -1), and fit() is run with the same parameters,
+        including the outlier rejection. The smooth curve, the trend and
+        the growth rate of each member are taken in the range where fit()
+        gives its result (the data period +- extrap_days).
+
+        The standard deviation over the members at each day, multiplied
+        by the delete-d jackknife factor sqrt((1-f)/f) (Shao and Wu, 1989),
+        is the uncertainty (stdev) of the fitting result with all data.
+        The factor makes it nearly independent of f, and is 1 at f=0.5.
+        f is the actual fraction of the excluded units (e.g. 0.4996 for
+        exclude_frac=0.5 and 1265 units).
+
+        Run fit() first. The results are in boot_all() and boot_annual().
+
+        Args:
+            nboot (int): number of members (default: 1000)
+            exclude_frac (float): fraction of the excluded units,
+                0 < exclude_frac < 1 (default: 0.5)
+            seed (int): random seed (default: 0). If None, 128-bit entropy
+                is drawn from the OS. The seed is logged and kept in
+                boot_info.
+
+        Returns:
+            pd.DataFrame: stdev at each day of the result range
+                - d: day (see date2cday)
+                - stdev_value, stdev_trend, stdev_growthrate: stdev of
+                  smooth, trend and growthrate (corrected by the factor)
+                - ensmean_trend: mean of the trend over the members
+                - nboot: number of members covering the day
+
+        The smooth curve, the trend and the growth rate of each member are
+        kept in boot_smooth, boot_trend and boot_growthrate (nboot x days,
+        NaN out of the range).
+        """
+
+        if self.fit_result is None:
+            raise ValueError("No data. Run fit() first.")
+        if nboot < 2:
+            raise ValueError(f"nboot must be 2 or more: {nboot}")
+
+        loglevel = logger.level
+        start = time.perf_counter()
+
+        # units: "Range of day" groups of the effective data, as ijmapping
+        data = self.input_data
+        pre = self.preprocess(data)
+        qf = pre["qf"].to_numpy(copy=True)
+        rawd = pre["d"].to_numpy()
+        valid = np.flatnonzero(qf == 0)
+        d_group = (rawd - rawd.min()) // self.avgday
+        _, unit = np.unique(d_group[valid], return_inverse=True)
+        unit = unit.ravel()
+        nunit = int(unit.max()) + 1
+
+        exclude_frac = check_exclude_frac(exclude_frac, nunit)
+        rng, entropy = make_rng(seed)
+
+        logger.info("")
+        logger.info(" * * * * * Start Bootstrap * * * * *")
+        logger.info(" Number of members           : %8d", nboot)
+        logger.info(" Number of data units        : %8d", nunit)
+        logger.info(" Fraction of excluded units  : %8s", exclude_frac)
+        logger.info(" Random generator            : PCG64DXSM")
+        logger.info(" Seed                        : %s", entropy)
+
+        # result range of the fit with all data
+        tslice = slice(
+            self.trange[0] - int(self.extrap_days),
+            self.trange[1] + int(self.extrap_days),
+        )
+        win_d = self.fit_result["d"].to_numpy()[tslice]
+        nwin = len(win_d)
+
+        a_sm = np.full((nboot, nwin), np.nan)
+        a_tr = np.full((nboot, nwin), np.nan)
+        a_gr = np.full((nboot, nwin), np.nan)
+        a_frac = np.zeros(nboot)
+
+        member_data = data.copy()
+        excluded = np.zeros(nunit, dtype=bool)
+        nreport = max(nboot // 10, 1)
+
+        try:
+            for k in range(nboot):
+                excl = exclude_units(rng, nunit, exclude_frac)
+                a_frac[k] = len(excl) / nunit
+
+                excluded[:] = False
+                excluded[excl] = True
+                member_qf = qf.copy()
+                member_qf[valid[excluded[unit]]] = -1
+                member_data["qf"] = member_qf
+
+                member = N97Fit(
+                    avgday=self.avgday,
+                    sigma=self.sigma,
+                    nhm=self.nhm,
+                    cutlo=self.cutlo,
+                    orderlo=self.orderlo,
+                    orderhi=self.orderhi,
+                    sw_iteration=self.sw_iteration,
+                    loglevel="WARNING",
+                )
+                member.fit(member_data)
+
+                # result range of the member, on the days of win_d
+                mslice = slice(
+                    member.trange[0] - int(member.extrap_days),
+                    member.trange[1] + int(member.extrap_days),
+                )
+                mfit = member.fit_result.iloc[mslice]
+                idx = mfit["d"].to_numpy() - win_d[0]
+                sel = (idx >= 0) & (idx < nwin)
+                a_sm[k, idx[sel]] = mfit["smooth"].to_numpy()[sel]
+                a_tr[k, idx[sel]] = mfit["trend"].to_numpy()[sel]
+                a_gr[k, idx[sel]] = mfit["growthrate"].to_numpy()[sel]
+
+                if (k + 1) % nreport == 0 or k + 1 == nboot:
+                    logger.setLevel(loglevel)
+                    logger.info(
+                        " +Member %6d / %d  (%7.1f s)",
+                        k + 1,
+                        nboot,
+                        time.perf_counter() - start,
+                    )
+        finally:
+            logger.setLevel(loglevel)
+
+        frac = float(a_frac.mean())
+        scale = float(jackknife_scale(frac))
+
+        # days covered by no member (or one) give NaN (or 0) silently
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            stdev_sm = np.nanstd(a_sm, axis=0)
+            stdev_tr = np.nanstd(a_tr, axis=0)
+            stdev_gr = np.nanstd(a_gr, axis=0)
+            ensmean_tr = np.nanmean(a_tr, axis=0)
+
+        self.boot_smooth = a_sm
+        self.boot_trend = a_tr
+        self.boot_growthrate = a_gr
+        self.boot_info = {
+            "nboot": nboot,
+            "exclude_frac": exclude_frac,
+            "frac": frac,
+            "scale": scale,
+            "nunit": nunit,
+            "seed": entropy,
+        }
+        self.boot_result = pd.DataFrame(
+            {
+                "d": win_d,
+                "stdev_value": stdev_sm * scale,
+                "stdev_trend": stdev_tr * scale,
+                "stdev_growthrate": stdev_gr * scale,
+                "ensmean_trend": ensmean_tr,
+                "nboot": np.sum(~np.isnan(a_tr), axis=0),
+            }
+        )
+
+        logger.info("")
+        logger.info(" Mean fraction of excluded   : %8.4f", frac)
+        logger.info(" Stdev factor sqrt((1-f)/f)  : %8.4f", scale)
+        logger.info(" * * * * * End Bootstrap * * * * *")
+
+        return self.boot_result
 
     def preprocess(
         self, data: pd.DataFrame, inplace: bool = False, asarray: bool = False
@@ -1030,4 +1229,112 @@ class N97Fit:
             }
         )
 
+        return df
+
+    def boot_all(self, interval: int = 1, use_excel_date: bool = False) -> pd.DataFrame:
+        """Fitting result with the uncertainty by bootstrap
+
+        Same range and interval as all().
+
+        Args:
+            interval (int, optional): interval of data. Defaults to 1.
+            use_excel_date (bool, optional): If True, date is converted to continuous day.
+        Returns:
+            pd.DataFrame: fitting result with the uncertainty
+                - value, trend: smooth curve and trend with all data
+                - stdev_value, stdev_trend: stdev of them by bootstrap
+                - ensmean_trend: mean of the trend over the members
+                - nboot: number of members covering the day
+                - growthrate: growth rate with all data (same as all())
+                - stdev_growthrate: stdev of the growth rate by bootstrap
+                  (computed from the growth rate of each member)
+        """
+
+        if self.boot_result is None:
+            raise ValueError("No bootstrap result. Run bootstrap() first.")
+
+        tslice = slice(
+            self.trange[0] - int(self.extrap_days),
+            self.trange[1] + int(self.extrap_days),
+        )
+        fit_all = self.fit_result.iloc[tslice, :]
+        boot = self.boot_result
+
+        df = pd.DataFrame(
+            {
+                "year": fit_all["t"].to_numpy() + self.syear,
+                "value": fit_all["smooth"].to_numpy(),
+                "trend": fit_all["trend"].to_numpy(),
+                "stdev_value": boot["stdev_value"].to_numpy(),
+                "stdev_trend": boot["stdev_trend"].to_numpy(),
+                "ensmean_trend": boot["ensmean_trend"].to_numpy(),
+                "nboot": boot["nboot"].to_numpy(),
+                "date": fit_all["date"].to_numpy(),
+                "growthrate": fit_all["growthrate"].to_numpy(),
+                "stdev_growthrate": boot["stdev_growthrate"].to_numpy(),
+            }
+        ).iloc[::interval]
+
+        if use_excel_date:
+            df["date"] = df["date"].apply(lambda x: date2cday(x))
+
+        return df
+
+    def boot_annual(self) -> pd.DataFrame:
+        """Annual values of the trend with the uncertainty by bootstrap
+
+        Only the years fully in the range of all() (from Jan 1 to Jan 1 of
+        the next year) are given.
+            - ave_trend: mean of the trend in the year (same as annual())
+            - stdev_trend: mean of stdev_trend of boot_all() in the year
+            - ave_gr: trend(Jan 1 of the next year) - trend(Jan 1)
+            - stdev_gr: sqrt(stdev_trend(Jan 1)**2
+                             + stdev_trend(Jan 1 of the next year)**2)
+
+        Returns:
+            pd.DataFrame: annual values
+        """
+
+        if self.boot_result is None:
+            raise ValueError("No bootstrap result. Run bootstrap() first.")
+
+        tslice = slice(
+            self.trange[0] - int(self.extrap_days),
+            self.trange[1] + int(self.extrap_days),
+        )
+        fit_all = self.fit_result.iloc[tslice, :]
+        days = fit_all["date"].to_numpy().astype("datetime64[D]")
+        trend = fit_all["trend"].to_numpy()
+        stdev = self.boot_result["stdev_trend"].to_numpy()
+
+        def index(y, md):
+            return int((np.datetime64(f"{y:04d}-{md}") - days[0]).astype(np.int64))
+
+        rows = []
+        for y in range(days[0].astype(object).year, days[-1].astype(object).year):
+            i0 = index(y, "01-01")
+            i1 = index(y + 1, "01-01")
+            if i0 < 0 or i1 >= len(days):
+                continue
+            ave = group_mean(trend[i0:i1], np.zeros(i1 - i0, dtype=np.int64), 1)[0]
+            rows.append(
+                [
+                    y,
+                    ave,
+                    np.mean(stdev[i0:i1]),
+                    trend[i1] - trend[i0],
+                    np.hypot(stdev[i0], stdev[i1]),
+                ]
+            )
+
+        df = pd.DataFrame(
+            rows,
+            columns=[
+                "year",
+                "ave_trend",
+                "stdev_trend",
+                "ave_gr",
+                "stdev_gr",
+            ],
+        )
         return df
