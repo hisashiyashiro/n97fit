@@ -336,7 +336,15 @@ class N97Fit:
             # extrapolate right side
             rpad_pdata = int((x_t[xdata - 1] - x_t[tend]) / dt + spt) - 1
 
-            p = np.zeros(ndata + lpad_pdata + rpad_pdata, dtype=np.float64)
+            # interpolate large interval ( >= half year)
+            gap_pdata = [
+                int((t[j + 1] - t[j]) / dt) - 1 if t[j + 1] - t[j] >= 0.5 else 0
+                for j in range(0, ndata - 1)
+            ]
+
+            p = np.zeros(
+                ndata + lpad_pdata + rpad_pdata + sum(gap_pdata), dtype=np.float64
+            )
             q = np.zeros_like(p)
             r = np.zeros_like(p, dtype=np.int64)
 
@@ -353,10 +361,8 @@ class N97Fit:
                 r[pdata] = 1
 
                 # interpolate large interval ( >= half year)
-                if j < ndata - 1 and t[j + 1] - t[j] >= (self.days_in_year / 2.0):
-                    temp_pdata = int((t[j + 1] - t[j]) / dt) - 1
-
-                    for i in range(0, temp_pdata):
+                if j < ndata - 1:
+                    for i in range(0, gap_pdata[j]):
                         pdata += 1
                         p[pdata] = t[j] + dt * float(i + 1)
                         q[pdata] = 0.0
