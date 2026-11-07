@@ -901,12 +901,12 @@ class N97Fit:
         )
         fit_all = self.fit_result.iloc[tslice, :]
 
-        yr_group = fit_all.groupby(fit_all["t"].astype(int))
+        yr_group = fit_all.groupby(fit_all["date"].dt.year)
         ys = np.array([*yr_group.groups.keys()])
 
         df = pd.DataFrame(
             {
-                "year": ys + self.syear,
+                "year": ys,
                 "ave_fit": yr_group["smooth"].mean(),
                 "stdev_fit": yr_group["smooth"].std(ddof=0),
                 "ave_trend": yr_group["trend"].mean(),
@@ -977,11 +977,11 @@ class N97Fit:
         fit_all["mn"] = fit_all["date"].apply(lambda x: x.month)
 
         mn_group = fit_all.groupby(["mn"])
-        eyear = int(fit_all["t"].max())
+        eyear = fit_all["date"].max().year
 
         df = pd.DataFrame(
             {
-                "period": f"{self.syear}#{self.syear + eyear}",
+                "period": f"{self.syear}#{eyear}",
                 "mn": mn_group.groups.keys(),
                 "ave_fit": mn_group["smooth"].mean(),
                 "stdev_fit": mn_group["smooth"].std(ddof=0),
@@ -1006,11 +1006,11 @@ class N97Fit:
         )
         fit_all = self.fit_result.iloc[tslice, :]
 
-        eyear = int(fit_all["t"].max())
+        eyear = fit_all["date"].max().year
 
         df = pd.DataFrame(
             {
-                "period": f"{self.syear}#{self.syear + eyear}",
+                "period": f"{self.syear}#{eyear}",
                 "ave_fit": fit_all["smooth"].mean(),
                 "stdev_fit": fit_all["smooth"].std(ddof=0),
                 "ave_trend": fit_all["trend"].mean(),
