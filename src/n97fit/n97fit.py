@@ -726,7 +726,7 @@ class N97Fit:
                 data["d"].values,
                 data["ymd"].values,
                 data["value"].values,
-                data["qf"].values,
+                data["qf"].to_numpy(copy=True),
                 syear,
             )
         else:
