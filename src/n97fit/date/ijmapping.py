@@ -102,3 +102,20 @@ def ijmapping(
     else:
         return avgdata
 
+
+def flatten_ijmap(ijmap: np.ndarray, ijdata: np.ndarray):
+    """Flatten the index of data in each group
+
+    Args:
+        ijmap (np.ndarray): indices of data in each group (from ijmapping)
+        ijdata (np.ndarray): number of data in each group
+
+    Returns:
+        (np.ndarray, np.ndarray): indices of data, and group of each data
+    """
+
+    ij = np.fromiter(
+        (k for m in ijmap for k in m), dtype=np.int64, count=int(np.sum(ijdata))
+    )
+    i = np.repeat(np.arange(len(ijdata)), ijdata)
+    return ij, i

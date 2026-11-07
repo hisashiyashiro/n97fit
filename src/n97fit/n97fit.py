@@ -6,9 +6,9 @@ import numpy as np
 import pandas as pd
 from scipy import signal
 
-from .date import ijmapping, date2cday, cday2date
+from .date import ijmapping, flatten_ijmap, date2cday
 from .io import logger, reportrej
-from .misc import reviseflag, matching, groupmean, FiltFilt
+from .misc import reviseflags, matching, groupmean, FiltFilt
 from .harmonics import frcoef, harmonic, smooth
 
 
@@ -120,16 +120,11 @@ class N97Fit:
         )
 
         # if individual value is out of sdev*pl_sigma, set to 2
-        sumcnt = 0
-
-        for i in range(0, ndata):
-            if ysdev[i] != 0:
-                sgm_allow = ysdev[i] * pl_sigma
-                for j in range(0, ijdata[i]):
-                    ij = ijmap[i][j]
-
-                    flag[ij], cnt = reviseflag(rawy[ij] - y[i], flag[ij], sgm_allow)
-                    sumcnt += cnt
+        ij, i = flatten_ijmap(ijmap, ijdata)
+        sgm_allow = ysdev[i] * pl_sigma
+        sumcnt = reviseflags(
+            flag, ij, rawy[ij] - y[i], sgm_allow, mask=ysdev[i] != 0
+        )
 
         logger.info("")
         logger.info(" *** Reject irregular data in same day ***")
@@ -291,14 +286,8 @@ class N97Fit:
 
                 # if value is out of sigma*pl_sigma, set to 2
                 sgm_allow = sgm_hmsp * pl_sigma
-                sumcnt = 0
-
-                for i in range(0, ndata):
-                    for j in range(0, ijdata[i]):
-                        ij = ijmap[i][j]
-
-                        flag[ij], cnt = reviseflag(de_hmsp[i], flag[ij], sgm_allow)
-                        sumcnt += cnt
+                ij, i = flatten_ijmap(ijmap, ijdata)
+                sumcnt = reviseflags(flag, ij, de_hmsp[i], sgm_allow)
 
                 logger.info("")
                 logger.info(" =>Reject data (sigma*%2d): %5d", pl_sigma, sumcnt)
@@ -329,7 +318,6 @@ class N97Fit:
             # *** Stage 3-1 : interpolation and extrapolation for bwf *** !
 
             spt = float(self.extrap_days) / self.days_in_year / dt
-            pdata = -1
 
             # extrapolate left side
             lpad_pdata = int((x_t[tstart] - x_t[0]) / dt - spt) - 1
@@ -337,44 +325,35 @@ class N97Fit:
             rpad_pdata = int((x_t[xdata - 1] - x_t[tend]) / dt - spt) - 1
 
             # interpolate large interval ( >= half year)
-            gap_pdata = [
-                int((t[j + 1] - t[j]) / dt) - 1 if t[j + 1] - t[j] >= 0.5 else 0
-                for j in range(0, ndata - 1)
-            ]
+            gap_t = t[1:ndata] - t[: ndata - 1]
+            gap_pdata = np.zeros(ndata, dtype=np.int64)
+            gap_pdata[:-1] = np.where(gap_t >= 0.5, (gap_t / dt).astype(np.int64) - 1, 0)
 
-            p = np.zeros(
-                ndata + lpad_pdata + rpad_pdata + sum(gap_pdata), dtype=np.float64
-            )
+            # each data point followed by the interpolated points
+            nblock = gap_pdata + 1
+            pdata = lpad_pdata + int(nblock.sum()) + rpad_pdata
+
+            p = np.zeros(pdata, dtype=np.float64)
             q = np.zeros_like(p)
             r = np.zeros_like(p, dtype=np.int64)
 
-            for i in range(0, lpad_pdata):
-                pdata += 1
-                p[pdata] = x_t[0] + dt * float(i + 1)
-                q[pdata] = 0.0
-                r[pdata] = 0
+            # left side (ideal, Q = 0)
+            i = np.arange(1, lpad_pdata + 1, dtype=np.float64)
+            p[:lpad_pdata] = x_t[0] + dt * i
 
-            for j in range(0, ndata):
-                pdata += 1
-                p[pdata] = t[j]
-                q[pdata] = de_hmsp[j]
-                r[pdata] = 1
+            # data (real, Q = Y - sp - hm) and large intervals (ideal, Q = 0)
+            j = np.repeat(np.arange(ndata), nblock)
+            k = np.arange(len(j)) - np.repeat(np.cumsum(nblock) - nblock, nblock)
+            real = lpad_pdata + np.flatnonzero(k == 0)
+            ideal = lpad_pdata + np.flatnonzero(k > 0)
+            p[real] = t[:ndata]
+            q[real] = de_hmsp[:ndata]
+            r[real] = 1
+            p[ideal] = t[j[k > 0]] + dt * k[k > 0].astype(np.float64)
 
-                # interpolate large interval ( >= half year)
-                if j < ndata - 1:
-                    for i in range(0, gap_pdata[j]):
-                        pdata += 1
-                        p[pdata] = t[j] + dt * float(i + 1)
-                        q[pdata] = 0.0
-                        r[pdata] = 0
-
-            for i in range(0, rpad_pdata):
-                pdata += 1
-                p[pdata] = x_t[tend] + dt * float(i + 1) + dt * spt
-                q[pdata] = 0.0
-                r[pdata] = 0
-
-            pdata += 1
+            # right side (ideal, Q = 0)
+            i = np.arange(1, rpad_pdata + 1, dtype=np.float64)
+            p[pdata - rpad_pdata :] = x_t[tend] + dt * i + dt * spt
 
             # *** Stage 3-2 : Set coefficients of butterworth filter *** !
 
@@ -415,6 +394,22 @@ class N97Fit:
             # first grid index with x_t > p - day_interval (for Q -> X mapping)
             pfirst = np.searchsorted(x_t, p[:pdata] - self.day_interval, side="right")
 
+            # grid points filled by each segment (p[i-1], p[i]) of Q wave
+            seg = np.full(xdata, -1, dtype=np.int64)
+            searchi = 0
+            for i in range(1, pdata):
+                if searchi >= xdata:
+                    break
+                # fill up to the first grid point within day_interval
+                # of p[i] (to the end of the grid if not found)
+                j = max(int(pfirst[i]), searchi)
+                if j >= xdata or not abs(x_t[j] - p[i]) < self.day_interval:
+                    j = xdata - 1
+                seg[searchi : j + 1] = i
+                searchi = j + 1
+            xfill = np.flatnonzero(seg >= 0)
+            seg = seg[xfill]
+
             for ite_i in range(0, 2):
                 if ite_i == 0:
                     logger.info("")
@@ -431,22 +426,10 @@ class N97Fit:
                     ite_j += 1
                     logger.info("  +iteration = %2d - %2d", ite_i + 1, ite_j + 1)
 
-                    # Map Q wave to X wave
-                    searchi = 0
-
-                    for i in range(1, pdata):
-                        if searchi >= xdata:
-                            break
-                        aa = (q[i] - q[i - 1]) / (p[i] - p[i - 1])
-                        bb = q[i] - aa * p[i]
-
-                        # fill up to the first grid point within day_interval
-                        # of p[i] (to the end of the grid if not found)
-                        j = max(int(pfirst[i]), searchi)
-                        if j >= xdata or not abs(x_t[j] - p[i]) < self.day_interval:
-                            j = xdata - 1
-                        x_q[searchi : j + 1] = aa * x_t[searchi : j + 1] + bb
-                        searchi = j + 1
+                    # Map Q wave to X wave (linear interpolation)
+                    aa = (q[1:pdata] - q[: pdata - 1]) / (p[1:pdata] - p[: pdata - 1])
+                    bb = q[1:pdata] - aa * p[1:pdata]
+                    x_q[xfill] = aa[seg - 1] * x_t[xfill] + bb[seg - 1]
 
                     # Low path filter
                     if ite_i == 0:
@@ -550,14 +533,9 @@ class N97Fit:
             sumcnt = 0
 
             if sw_iteration == 1:
-                for i in range(0, ndata):
-                    for j in range(0, ijdata[i]):
-                        ij = ijmap[i][j]
-
-                        if flag[ij] >= 0:
-                            dev = de_sphmlohi[i]  # Judge by using averaged
-                            flag[ij], cnt = reviseflag(dev, flag[ij], sgm_allow)
-                            sumcnt += cnt
+                # Judge by using averaged
+                ij, i = flatten_ijmap(ijmap, ijdata)
+                sumcnt += reviseflags(flag, ij, de_sphmlohi[i], sgm_allow)
 
                 logger.info("")
                 logger.info("  =>Reject data (sigma*%2d): %5d", pl_sigma, sumcnt)
@@ -596,10 +574,8 @@ class N97Fit:
             logger.info("")
             logger.info("  +Sigma(Y -total) = %12.7E", sgm_all)
 
-            for ij in range(0, rawndata):
-                if flag[ij] >= 0:
-                    flag[ij], cnt = reviseflag(dev[ij], flag[ij], sgm_allow)
-                    sumcnt += cnt
+            ij = np.arange(rawndata)
+            sumcnt += reviseflags(flag, ij, dev[:rawndata], sgm_allow)
 
             logger.info("")
             logger.info("  =>Reject data (sigma*%2d): %5d", pl_sigma, sumcnt)
@@ -630,8 +606,9 @@ class N97Fit:
         )
 
         # eff_data : averaged effective raw data (flag 0)
-        s_index = np.array([ijmap[i][0] for i in range(ndata)])
-        e_index = np.array([ijmap[i][-1] for i in range(ndata)])
+        s_index = np.array([ijmap[i][0] for i in range(ndata)], dtype=np.int64)
+        e_index = np.array([ijmap[i][-1] for i in range(ndata)], dtype=np.int64)
+        cday0 = np.datetime64("1899-12-30", "D")  # see cday2date
         self.eff_data = pd.DataFrame(
             {
                 "d": d,
@@ -641,14 +618,8 @@ class N97Fit:
                 "detrended": y - t_tr[s_index],
                 "deseasonal": y - t_ss[s_index],
                 "deviation": y - t_tt[s_index],
-                "sdate": np.array(
-                    [cday2date(rawd[j]) for j in s_index],
-                    dtype="datetime64[D]",
-                ),
-                "edate": np.array(
-                    [cday2date(rawd[j]) for j in e_index],
-                    dtype="datetime64[D]",
-                ),
+                "sdate": cday0 + rawd[s_index],
+                "edate": cday0 + rawd[e_index],
             }
         )
 
