@@ -199,7 +199,6 @@ class N97Fit:
         else:
             itelim = 1
 
-        temp_cnt = None
         for iteration in range(0, itelim):
             logger.info("")
             logger.info("* * * * * * * * * * * * * * * * * * * * * * * * * * * *")
@@ -561,7 +560,7 @@ class N97Fit:
 
                 reportrej(rawndata, rawymd, rawy, flag, 2)
 
-                if sumcnt == temp_cnt:
+                if sumcnt == 0:
                     break
 
                 # Re-Allocate 2D Array (reject flag 1 and 2)
@@ -571,7 +570,6 @@ class N97Fit:
 
                 logger.info("")
                 logger.info("  =====> BACK TO STAGE 2 =====> ")
-                temp_cnt = sumcnt
 
         logger.info("")
         logger.info("* * * * * * * * * * * * * * * * * * * * * * * * * * * *")
