@@ -81,7 +81,7 @@ def write_fixedformat(
     data = data.copy()
     for col, value in fillna.items():
         if is_object_dtype(data[col].dtype):
-            logger.warn("Warning: %s is object dtype. Fillna is skipped.", col)
+            logger.warning("Warning: %s is object dtype. Fillna is skipped.", col)
             continue
 
         data[col] = data[col].fillna(value)
