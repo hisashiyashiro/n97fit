@@ -29,6 +29,7 @@ We would like to thank Prof. Shinji Morimoto and the staff and students of the C
 
 - python >= 3.8
 - numpy
+- scipy
 - pandas
 
 ## Running as a module
@@ -67,6 +68,30 @@ We would like to thank Prof. Shinji Morimoto and the staff and students of the C
 - fit\_period.txt     : Fitting results, mean of the whole period
 
 # Release Notes
+
+## 2026-11-07
+
+- Version 1.1.0
+- Speed up fit() by vectorizing the main loops (about 5x faster).
+  This part does not change the results.
+- Bug fixes (the results change):
+    - The sigma of the final outlier check (sw\_iteration=0) is computed
+      from the data with flag 0 only. Invalid values (-999.99) and
+      rejected data were included before.
+    - The refit of the smoothed harmonics uses all of the 3-day trimmed
+      points.
+    - Data gaps longer than half a year are interpolated as intended.
+    - The right-side extrapolation points stay within the 1-day grid.
+    - annual(), multimonth() and period() use calendar years.
+    - The outer iteration (sw\_iteration=1) stops when no new data are
+      rejected.
+    - The 1-day grid is placed at 12:00 like the data. The "year" column
+      of the fitting results shifts by half a day.
+    - Accessors called before fit() raise ValueError.
+    - No SyntaxWarning on Python 3.12 or later.
+- Renamed columns: ave\_trend/stdev\_trend of fit\_monthly.txt and
+  fit\_multimonth.txt are renamed to ave\_seasonal/stdev\_seasonal.
+  They are the mean and standard deviation of the seasonal component.
 
 ## 2024-04-01
 
