@@ -462,7 +462,7 @@ class N97Fit:
                         trim_x_t[:ntrim] = x_t[tstart : tend + 1 : 3]
                         trim_x_hm_hi[:ntrim] = x_hm_hi[tstart : tend + 1 : 3]
 
-                        hm_coef = frcoef(ndata, trim_x_t, trim_x_hm_hi, nh, nterm)
+                        hm_coef = frcoef(ntrim, trim_x_t, trim_x_hm_hi, nh, nterm)
 
                         t_hm = harmonic(t, hm_coef, nh)
 
