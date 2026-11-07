@@ -660,10 +660,7 @@ class N97Fit:
                 "harmonics": x_hm,
                 "shortterm": x_hi,
                 "growthrate": dtrdtt(x_tr, x_t),
-                "date": np.array(
-                    [cday2date(cd) for cd in x_d],
-                    dtype="datetime64[D]",
-                ),
+                "date": np.datetime64("1899-12-30", "D") + x_d,
             },
         )
 
@@ -685,19 +682,18 @@ class N97Fit:
         sdate = date(syear, 1, 1)
 
         # convert date to YYYYMMDD
-        data["ymd"] = (
-            data["date"].apply(lambda x: x.year * 10000 + x.month * 100 + x.day).astype(int)
-        )
+        dts = data["date"].dt
+        data["ymd"] = (dts.year * 10000 + dts.month * 100 + dts.day).astype(int)
 
-        # convert date to continuous day
-        data["d"] = data["date"].apply(
-            lambda x: date2cday(x),
-        )
+        # convert date to continuous day (serial day of MS Excel, see date2cday)
+        data["d"] = (
+            data["date"].values.astype("datetime64[D]") - np.datetime64("1899-12-30", "D")
+        ).astype(np.int64)
 
         # convert date to continuous year
-        data["t"] = data["d"].apply(
-            lambda x: ( float( x - date2cday(sdate) ) + 0.5 ) / float( self.days_in_year )
-        )
+        data["t"] = (
+            (data["d"] - date2cday(sdate)).astype(np.float64) + 0.5
+        ) / float(self.days_in_year)
 
         # convert date to continuous year (exact calculation)
 #         data["t"] = data["date"].apply(
