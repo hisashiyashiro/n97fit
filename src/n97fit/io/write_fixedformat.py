@@ -81,15 +81,48 @@ def write_fixedformat(
     data = data.copy()
     for col, value in fillna.items():
         if is_object_dtype(data[col].dtype):
-            logger.warn("Warning: %s is object dtype. Fillna is skipped.", col)
+            logger.warning("Warning: %s is object dtype. Fillna is skipped.", col)
             continue
 
         data[col] = data[col].fillna(value)
 
-    data.to_string(file, index=False, formatters=formatters, **kwargs)
+    if kwargs or len(data) == 0 or len(data.columns) == 0:
+        data.to_string(file, index=False, formatters=formatters, **kwargs)
+    else:
+        text = to_fixed_width(data, formatters)
+        if hasattr(file, "write"):
+            file.write(text)
+        else:
+            with open(file, "w", encoding="utf-8", newline="") as f:
+                f.write(text)
 
     name = file.name if hasattr(file, "name") else type(file).__name__
     logger.info(" +Output %-24s : %5d lines", name, len(data))
+
+
+def to_fixed_width(data: pd.DataFrame, formatters: Dict[str, Any]) -> str:
+    """Same text as data.to_string(index=False, formatters=formatters)
+
+    to_string calls the formatters through its own machinery for each
+    value, which is slow for large data. Here each column is formatted at
+    once and right-justified to the width of the column (or its name),
+    and the columns are separated by a space.
+
+    Args:
+        data (pd.DataFrame): Data to write (not empty).
+        formatters (Dict[str, Any]): Formatter of each column.
+
+    Returns:
+        str: Text without the last newline.
+    """
+
+    columns = []
+    for name in data.columns:
+        cells = [str(name)] + list(map(formatters[name], data[name].tolist()))
+        width = max(map(len, cells))
+        columns.append([c.rjust(width) for c in cells])
+
+    return "\n".join(" ".join(row) for row in zip(*columns))
 
 
 class DefaultFormatter:
