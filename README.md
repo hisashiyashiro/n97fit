@@ -133,6 +133,21 @@ Shao, J. and Wu, C. F. J. (1989), A general theory for jackknife variance estima
 
 # Release Notes
 
+## 2026-11-08
+
+- Version 1.2.0
+- New feature: uncertainty of the fitting results by bootstrap (see
+  "Uncertainty by bootstrap" above).
+    - N97Fit.bootstrap() thins out the data at random and fits them
+      again (default: 1000 members, half of the data excluded, seed 0).
+      The stdev over the members is corrected by the delete-d jackknife
+      factor sqrt((1-f)/f).
+    - boot\_all() and boot\_annual() give the smooth curve, the trend,
+      the growth rate and the annual values with their stdev.
+    - The command line writes boot\_all.txt and boot\_annual.txt with
+      the option --bootstrap (--nboot, --exclude-frac and --seed).
+- The results of fit() and the other output files do not change.
+
 ## 2026-11-07
 
 - Version 1.1.1
