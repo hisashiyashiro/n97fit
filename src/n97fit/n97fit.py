@@ -8,7 +8,7 @@ from scipy import signal
 
 from .date import ijmapping, date2cday, cday2date
 from .io import logger, reportrej
-from .misc import reviseflag, matching
+from .misc import reviseflag, matching, groupmean
 from .harmonics import frcoef, harmonic, smooth
 
 
@@ -902,13 +902,14 @@ class N97Fit:
 
         yr_group = fit_all.groupby(fit_all["date"].dt.year)
         ys = np.array([*yr_group.groups.keys()])
+        yr_mean = groupmean(fit_all, fit_all["date"].dt.year, ["smooth", "trend"])
 
         df = pd.DataFrame(
             {
                 "year": ys,
-                "ave_fit": yr_group["smooth"].mean(),
+                "ave_fit": yr_mean["smooth"],
                 "stdev_fit": yr_group["smooth"].std(ddof=0),
-                "ave_trend": yr_group["trend"].mean(),
+                "ave_trend": yr_mean["trend"],
                 "stdev_trend": yr_group["trend"].std(ddof=0),
             }
         )
@@ -943,6 +944,7 @@ class N97Fit:
         fit_all.loc[fit_all["d"] > dend, ["smooth", "seasonal"]] = NaN
 
         ym_group = fit_all.groupby(["year", "mn"])
+        ym_mean = groupmean(fit_all, ["year", "mn"], ["smooth", "seasonal"])
 
         ys = np.array([y for (y, m) in ym_group.groups.keys()])
         mn = np.array([m for (y, m) in ym_group.groups.keys()])
@@ -951,9 +953,9 @@ class N97Fit:
             {
                 "year": ys,
                 "mn": mn,
-                "ave_fit": ym_group["smooth"].mean(),
+                "ave_fit": ym_mean["smooth"],
                 "stdev_fit": ym_group["smooth"].std(ddof=0),
-                "ave_seasonal": ym_group["seasonal"].mean(),
+                "ave_seasonal": ym_mean["seasonal"],
                 "stdev_seasonal": ym_group["seasonal"].std(ddof=0),
             },
         )
@@ -975,16 +977,17 @@ class N97Fit:
 
         fit_all["mn"] = fit_all["date"].apply(lambda x: x.month)
 
-        mn_group = fit_all.groupby(["mn"])
+        mn_group = fit_all.groupby("mn")
+        mn_mean = groupmean(fit_all, "mn", ["smooth", "seasonal"])
         eyear = fit_all["date"].max().year
 
         df = pd.DataFrame(
             {
                 "period": f"{self.syear}#{eyear}",
                 "mn": mn_group.groups.keys(),
-                "ave_fit": mn_group["smooth"].mean(),
+                "ave_fit": mn_mean["smooth"],
                 "stdev_fit": mn_group["smooth"].std(ddof=0),
-                "ave_seasonal": mn_group["seasonal"].mean(),
+                "ave_seasonal": mn_mean["seasonal"],
                 "stdev_seasonal": mn_group["seasonal"].std(ddof=0),
             },
         )
