@@ -1,7 +1,7 @@
 from typing import Tuple
 import numpy as np
 
-from scipy.interpolate import make_smoothing_spline
+from scipy.interpolate import BSpline, make_smoothing_spline
 
 
 def smooth(
@@ -19,5 +19,12 @@ def smooth(
         (np.ndarray, np.ndarray): coefficients of cubic spline
     """
 
-    spline = make_smoothing_spline(x1[:ndata], y1[:ndata], lam=rm)
-    return spline
+    # The smoothing spline of y - c is that of y minus c. Subtracting the
+    # mean makes the rounding error of the solver much smaller.
+    ymean = np.mean(y1[:ndata])
+    spline = make_smoothing_spline(x1[:ndata], y1[:ndata] - ymean, lam=rm)
+
+    # add the mean back to the coefficients (B-splines sum to one)
+    return BSpline(
+        spline.t, spline.c + ymean, spline.k, extrapolate=spline.extrapolate
+    )
