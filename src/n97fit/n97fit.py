@@ -165,7 +165,8 @@ class N97Fit:
 
         sdate = date2cday(date(syear, 1, 1))
         x_d[:] = np.arange(xstart, xend + 1)
-        x_t[:] = (x_d - sdate).astype(np.float64) / self.days_in_year
+        # assume 12:00, same as t of the data (see preprocess)
+        x_t[:] = ((x_d - sdate).astype(np.float64) + 0.5) / self.days_in_year
 
         # last grid point within day_interval
         idx = np.nonzero(np.abs(x_t - t[0]) <= self.day_interval)[0]
