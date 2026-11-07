@@ -164,13 +164,16 @@ class N97Fit:
         tend = 0
 
         sdate = date2cday(date(syear, 1, 1))
-        for i in range(0, xdata):
-            x_d[i] = i + xstart
-            x_t[i] = float(x_d[i] - sdate) / self.days_in_year
-            if abs(x_t[i] - t[0]) <= self.day_interval:
-                tstart = i
-            if abs(x_t[i] - t[ndata - 1]) <= self.day_interval:
-                tend = i
+        x_d[:] = np.arange(xstart, xend + 1)
+        x_t[:] = (x_d - sdate).astype(np.float64) / self.days_in_year
+
+        # last grid point within day_interval
+        idx = np.nonzero(np.abs(x_t - t[0]) <= self.day_interval)[0]
+        if idx.size:
+            tstart = idx[-1]
+        idx = np.nonzero(np.abs(x_t - t[ndata - 1]) <= self.day_interval)[0]
+        if idx.size:
+            tend = idx[-1]
 
         logger.info("")
         logger.info("***Prepare ideal wave (1-day resolution)***")
