@@ -334,7 +334,7 @@ class N97Fit:
             # extrapolate left side
             lpad_pdata = int((x_t[tstart] - x_t[0]) / dt - spt) - 1
             # extrapolate right side
-            rpad_pdata = int((x_t[xdata - 1] - x_t[tend]) / dt + spt) - 1
+            rpad_pdata = int((x_t[xdata - 1] - x_t[tend]) / dt - spt) - 1
 
             # interpolate large interval ( >= half year)
             gap_pdata = [
