@@ -43,9 +43,9 @@ class N97Fit:
     trange: tuple
     nh: int
     hm_coef: np.ndarray
-    raw_data: pd.DataFrame
-    eff_data: pd.DataFrame
-    fit_result: pd.DataFrame
+    raw_data: pd.DataFrame = None
+    eff_data: pd.DataFrame = None
+    fit_result: pd.DataFrame = None
 
     extrap_days: int = 30
     day_interval: float = 0.0027
@@ -165,7 +165,8 @@ class N97Fit:
 
         sdate = date2cday(date(syear, 1, 1))
         x_d[:] = np.arange(xstart, xend + 1)
-        x_t[:] = (x_d - sdate).astype(np.float64) / self.days_in_year
+        # assume 12:00, same as t of the data (see preprocess)
+        x_t[:] = ((x_d - sdate).astype(np.float64) + 0.5) / self.days_in_year
 
         # last grid point within day_interval
         idx = np.nonzero(np.abs(x_t - t[0]) <= self.day_interval)[0]
@@ -199,7 +200,6 @@ class N97Fit:
         else:
             itelim = 1
 
-        temp_cnt = None
         for iteration in range(0, itelim):
             logger.info("")
             logger.info("* * * * * * * * * * * * * * * * * * * * * * * * * * * *")
@@ -334,9 +334,17 @@ class N97Fit:
             # extrapolate left side
             lpad_pdata = int((x_t[tstart] - x_t[0]) / dt - spt) - 1
             # extrapolate right side
-            rpad_pdata = int((x_t[xdata - 1] - x_t[tend]) / dt + spt) - 1
+            rpad_pdata = int((x_t[xdata - 1] - x_t[tend]) / dt - spt) - 1
 
-            p = np.zeros(ndata + lpad_pdata + rpad_pdata, dtype=np.float64)
+            # interpolate large interval ( >= half year)
+            gap_pdata = [
+                int((t[j + 1] - t[j]) / dt) - 1 if t[j + 1] - t[j] >= 0.5 else 0
+                for j in range(0, ndata - 1)
+            ]
+
+            p = np.zeros(
+                ndata + lpad_pdata + rpad_pdata + sum(gap_pdata), dtype=np.float64
+            )
             q = np.zeros_like(p)
             r = np.zeros_like(p, dtype=np.int64)
 
@@ -353,10 +361,8 @@ class N97Fit:
                 r[pdata] = 1
 
                 # interpolate large interval ( >= half year)
-                if j < ndata - 1 and t[j + 1] - t[j] >= (self.days_in_year / 2.0):
-                    temp_pdata = int((t[j + 1] - t[j]) / dt) - 1
-
-                    for i in range(0, temp_pdata):
+                if j < ndata - 1:
+                    for i in range(0, gap_pdata[j]):
                         pdata += 1
                         p[pdata] = t[j] + dt * float(i + 1)
                         q[pdata] = 0.0
@@ -462,7 +468,7 @@ class N97Fit:
                         trim_x_t[:ntrim] = x_t[tstart : tend + 1 : 3]
                         trim_x_hm_hi[:ntrim] = x_hm_hi[tstart : tend + 1 : 3]
 
-                        hm_coef = frcoef(ndata, trim_x_t, trim_x_hm_hi, nh, nterm)
+                        hm_coef = frcoef(ntrim, trim_x_t, trim_x_hm_hi, nh, nterm)
 
                         t_hm = harmonic(t, hm_coef, nh)
 
@@ -555,7 +561,7 @@ class N97Fit:
 
                 reportrej(rawndata, rawymd, rawy, flag, 2)
 
-                if sumcnt == temp_cnt:
+                if sumcnt == 0:
                     break
 
                 # Re-Allocate 2D Array (reject flag 1 and 2)
@@ -565,7 +571,6 @@ class N97Fit:
 
                 logger.info("")
                 logger.info("  =====> BACK TO STAGE 2 =====> ")
-                temp_cnt = sumcnt
 
         logger.info("")
         logger.info("* * * * * * * * * * * * * * * * * * * * * * * * * * * *")
@@ -582,7 +587,7 @@ class N97Fit:
 
         if sw_iteration == 0:
             dev       = rawy - t_tt
-            sgm_all   = np.std(dev)
+            sgm_all   = np.std(dev[flag == 0])
             sgm_allow = sgm_all * pl_sigma
 
             logger.info("")
@@ -720,7 +725,7 @@ class N97Fit:
                 data["d"].values,
                 data["ymd"].values,
                 data["value"].values,
-                data["qf"].values,
+                data["qf"].to_numpy(copy=True),
                 syear,
             )
         else:
@@ -895,12 +900,12 @@ class N97Fit:
         )
         fit_all = self.fit_result.iloc[tslice, :]
 
-        yr_group = fit_all.groupby(fit_all["t"].astype(int))
+        yr_group = fit_all.groupby(fit_all["date"].dt.year)
         ys = np.array([*yr_group.groups.keys()])
 
         df = pd.DataFrame(
             {
-                "year": ys + self.syear,
+                "year": ys,
                 "ave_fit": yr_group["smooth"].mean(),
                 "stdev_fit": yr_group["smooth"].std(ddof=0),
                 "ave_trend": yr_group["trend"].mean(),
@@ -948,8 +953,8 @@ class N97Fit:
                 "mn": mn,
                 "ave_fit": ym_group["smooth"].mean(),
                 "stdev_fit": ym_group["smooth"].std(ddof=0),
-                "ave_trend": ym_group["seasonal"].mean(),
-                "stdev_trend": ym_group["seasonal"].std(ddof=0),
+                "ave_seasonal": ym_group["seasonal"].mean(),
+                "stdev_seasonal": ym_group["seasonal"].std(ddof=0),
             },
         )
 
@@ -971,16 +976,16 @@ class N97Fit:
         fit_all["mn"] = fit_all["date"].apply(lambda x: x.month)
 
         mn_group = fit_all.groupby(["mn"])
-        eyear = int(fit_all["t"].max())
+        eyear = fit_all["date"].max().year
 
         df = pd.DataFrame(
             {
-                "period": f"{self.syear}#{self.syear + eyear}",
+                "period": f"{self.syear}#{eyear}",
                 "mn": mn_group.groups.keys(),
                 "ave_fit": mn_group["smooth"].mean(),
                 "stdev_fit": mn_group["smooth"].std(ddof=0),
-                "ave_trend": mn_group["seasonal"].mean(),
-                "stdev_trend": mn_group["seasonal"].std(ddof=0),
+                "ave_seasonal": mn_group["seasonal"].mean(),
+                "stdev_seasonal": mn_group["seasonal"].std(ddof=0),
             },
         )
         df["period"] = df["period"].convert_dtypes()
@@ -1000,11 +1005,11 @@ class N97Fit:
         )
         fit_all = self.fit_result.iloc[tslice, :]
 
-        eyear = int(fit_all["t"].max())
+        eyear = fit_all["date"].max().year
 
         df = pd.DataFrame(
             {
-                "period": f"{self.syear}#{self.syear + eyear}",
+                "period": f"{self.syear}#{eyear}",
                 "ave_fit": fit_all["smooth"].mean(),
                 "stdev_fit": fit_all["smooth"].std(ddof=0),
                 "ave_trend": fit_all["trend"].mean(),

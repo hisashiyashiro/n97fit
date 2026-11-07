@@ -53,7 +53,7 @@ def read_n97format(file: Union[str, os.PathLike, IO[Any]]) -> pd.DataFrame:
 
     data = pd.read_table(
         file,
-        sep="\s+",
+        sep=r"\s+",
         skiprows=0,
         header=None,
         names=dtypes.keys(),

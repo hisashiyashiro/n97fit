@@ -161,8 +161,8 @@ def cli_main():
         fillna={
             "ave_fit": -999.9999999,
             "stdev_fit": -99.9999999,
-            "ave_trend": -999.9999999,
-            "stdev_trend": -99.9999999,
+            "ave_seasonal": -999.9999999,
+            "stdev_seasonal": -99.9999999,
         },
     )
 
