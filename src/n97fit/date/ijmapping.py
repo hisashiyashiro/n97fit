@@ -60,7 +60,7 @@ def ijmapping(
             "y": group["y"].mean(),
             "ysdev": group["y"].std(ddof=0),
             "ijdata": group.size(),
-            "ijmap": group.apply(lambda x: x.index.to_list()),
+            "ijmap": pd.Series({k: v.to_list() for k, v in group.groups.items()}),
         }
     )
 
