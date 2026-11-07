@@ -1286,10 +1286,13 @@ class N97Fit:
         Only the years fully in the range of all() (from Jan 1 to Jan 1 of
         the next year) are given.
             - ave_trend: mean of the trend in the year (same as annual())
-            - stdev_trend: mean of stdev_trend of boot_all() in the year
+            - stdev_trend: stdev of ave_trend by bootstrap
             - ave_gr: trend(Jan 1 of the next year) - trend(Jan 1)
-            - stdev_gr: sqrt(stdev_trend(Jan 1)**2
-                             + stdev_trend(Jan 1 of the next year)**2)
+            - stdev_gr: stdev of ave_gr by bootstrap
+
+        The stdev is that of the annual values of the members, multiplied
+        by the factor sqrt((1-f)/f) (see bootstrap()). The members that do
+        not cover the whole year (or both Jan 1) are not used.
 
         Returns:
             pd.DataFrame: annual values
@@ -1305,7 +1308,8 @@ class N97Fit:
         fit_all = self.fit_result.iloc[tslice, :]
         days = fit_all["date"].to_numpy().astype("datetime64[D]")
         trend = fit_all["trend"].to_numpy()
-        stdev = self.boot_result["stdev_trend"].to_numpy()
+        members = self.boot_trend
+        scale = self.boot_info["scale"]
 
         def index(y, md):
             return int((np.datetime64(f"{y:04d}-{md}") - days[0]).astype(np.int64))
@@ -1317,13 +1321,20 @@ class N97Fit:
             if i0 < 0 or i1 >= len(days):
                 continue
             ave = group_mean(trend[i0:i1], np.zeros(i1 - i0, dtype=np.int64), 1)[0]
+
+            # annual values of the members covering the year
+            block = members[:, i0:i1]
+            m_ave = block[~np.isnan(block).any(axis=1)].mean(axis=1)
+            m_gr = members[:, i1] - members[:, i0]
+            m_gr = m_gr[~np.isnan(m_gr)]
+
             rows.append(
                 [
                     y,
                     ave,
-                    np.mean(stdev[i0:i1]),
+                    np.std(m_ave) * scale if len(m_ave) else np.nan,
                     trend[i1] - trend[i0],
-                    np.hypot(stdev[i0], stdev[i1]),
+                    np.std(m_gr) * scale if len(m_gr) else np.nan,
                 ]
             )
 

@@ -116,9 +116,10 @@ Method:
     - ensmean\_trend: mean of the trend over the members
 - boot\_annual.txt (the years fully in the range):
     - ave\_trend: mean of the trend in the year (same as fit\_annual.txt)
-    - stdev\_trend: mean of stdev\_trend of boot\_all.txt in the year
     - ave\_gr: trend(Jan 1 of the next year) - trend(Jan 1)
-    - stdev\_gr: sqrt(stdev\_trend(Jan 1)^2 + stdev\_trend(next Jan 1)^2)
+    - stdev\_trend, stdev\_gr: stdev of them, from the annual values of
+      each member. The members that do not cover the whole year are
+      not used.
 - Notes:
     - Each unit is excluded independently, so the correlation of the
       data in time is not considered. The stdev can be underestimated
