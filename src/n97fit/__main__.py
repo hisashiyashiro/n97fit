@@ -69,26 +69,33 @@ def getargs():
     parser.add_argument(
         "--bootstrap",
         action="store_true",
-        help="estimate the uncertainty by bootstrap",
+        help="estimate the uncertainty by resampling",
+    )
+    parser.add_argument(
+        "--method",
+        choices=["wild", "jackknife"],
+        default="wild",
+        help="wild: wild bootstrap of the residuals (default),"
+        " jackknife: delete-d jackknife",
     )
     parser.add_argument(
         "--nboot",
         type=int,
         default=1000,
-        help="number of bootstrap members (default: 1000)",
+        help="number of members (default: 1000)",
     )
     parser.add_argument(
         "--exclude-frac",
         type=exclude_frac_type,
         default=0.5,
-        help="fraction of the data excluded in each bootstrap member,"
+        help="jackknife only: fraction of the data excluded in each member,"
         " 0 < f < 1 (default: 0.5)",
     )
     parser.add_argument(
         "--seed",
         type=int,
         default=0,
-        help="random seed of bootstrap (default: 0)",
+        help="random seed (default: 0)",
     )
     args, _ = parser.parse_known_args()
 
@@ -127,7 +134,10 @@ def cli_main():
     # exec bootstrap
     if args.bootstrap:
         n97fit.bootstrap(
-            nboot=args.nboot, exclude_frac=args.exclude_frac, seed=args.seed
+            nboot=args.nboot,
+            method=args.method,
+            exclude_frac=args.exclude_frac,
+            seed=args.seed,
         )
 
     # fetch results

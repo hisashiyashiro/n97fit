@@ -69,22 +69,26 @@ We would like to thank Prof. Shinji Morimoto and the staff and students of the C
 
 ## Uncertainty by bootstrap
 
-The uncertainty of the fitting results is estimated by bootstrap: the
-data are thinned out at random and fitted again, many times.
+The uncertainty of the fitting results is estimated by resampling: the
+data are resampled and fitted again, many times. The standard method is
+the wild bootstrap of the residuals; the delete-d jackknife can also be
+selected.
 
     $> python -m n97fit [input_file] [config_file] [output_dir] --bootstrap
 
-    --bootstrap       : Estimate the uncertainty by bootstrap
-    --nboot N         : Number of bootstrap members (default: 1000)
-    --exclude-frac F  : Fraction of the data excluded in each member,
-                        0 < F < 1 (default: 0.5)
+    --bootstrap       : Estimate the uncertainty by resampling
+    --method M        : wild (wild bootstrap of the residuals, default)
+                        or jackknife (delete-d jackknife)
+    --nboot N         : Number of members (default: 1000)
+    --exclude-frac F  : Jackknife only. Fraction of the data excluded in
+                        each member, 0 < F < 1 (default: 0.5)
     --seed S          : Random seed (default: 0)
 
 or in python:
 
     nf = n97fit.N97Fit()
     nf.fit(data)
-    nf.bootstrap()      # nboot=1000, exclude_frac=0.5, seed=0
+    nf.bootstrap()      # method="wild", nboot=1000, seed=0
     nf.boot_all()       # fitting results with the uncertainty
     nf.boot_annual()    # annual values with the uncertainty
 
@@ -97,17 +101,43 @@ Outputs (with --bootstrap):
 
 Method:
 
-- The unit of thinning is the "Range of day" group (the day with
-  avgday=1) of the data with flag 0. In each member, a fraction f of
-  the units are excluded at random, and the data are fitted with the
-  same parameters, including the rejection of outliers.
+- The unit of resampling is the "Range of day" group (the day with
+  avgday=1) of the data used for the fit with all data.
+- Wild bootstrap of the residuals (--method wild, default):
+    - The days of the data are kept, and the residuals about the smooth
+      curve s are flipped at random,
+      y\*\_j = s\_j + v\_i (y\_j - s\_j) / sqrt(1 - h\_i),
+      for each data j of unit i. v\_i is +1 or -1 with probability 1/2,
+      and h\_i is the leverage of the smooth curve at unit i.
+    - The members are fitted with the same parameters, without the
+      rejection of outliers. The fit is then linear in the data, and
+      h\_i is the change of the smooth curve at unit i when the data of
+      unit i are increased by 1. It needs as many fits as the units.
+    - Dividing by sqrt(1 - h\_i) undoes the shrinkage of the residuals
+      about the fitted curve (h\_i <= 0.99).
+    - Each residual keeps its own size, so the seasonal change of the
+      noise is kept.
+    - It gives the uncertainty by the errors of the data (including the
+      short-term variations) for the days of the data.
+- Delete-d jackknife (--method jackknife):
+    - In each member, a fraction F of the units are excluded at random,
+      and the data are fitted with the same parameters, including the
+      rejection of outliers.
+    - The stdev over the members is multiplied by sqrt((1-f)/f) (Shao
+      and Wu, 1989). The corrected stdev is nearly independent of f, and
+      the factor is 1 at f=0.5. f is the actual fraction of the
+      excluded units, round(F x units) / units.
+    - It also includes the variation by the days of the data, and gives
+      a larger stdev than the wild bootstrap (15% larger on average for
+      the sample data).
+    - The bootstrap() of version 1.2.0 is this method. Resampling the
+      data with replacement is not a bootstrap with this fitting: the
+      duplicated data are averaged in the same day, so their weight is
+      lost, and it ends up excluding about 37% of the data at random.
 - The smooth curve, the trend and the growth rate of each member are
   taken in the range of fit\_all.txt (the data period +- 30 days). The
-  members that cover each day are counted in the column nboot.
-- The stdev over the members is multiplied by sqrt((1-f)/f), the factor
-  of the delete-d jackknife (Shao and Wu, 1989). The corrected stdev is
-  nearly independent of f, and the factor is 1 at f=0.5. f is the
-  actual fraction of the excluded units, round(F x units) / units.
+  members that cover each day are counted in the column nboot (always
+  the number of members for the wild bootstrap).
 - boot\_all.txt:
     - value, trend, growthrate: same as fit\_all.txt
     - stdev\_value, stdev\_trend, stdev\_growthrate: stdev of them.
@@ -121,15 +151,22 @@ Method:
       each member. The members that do not cover the whole year are
       not used.
 - Notes:
-    - Each unit is excluded independently, so the correlation of the
+    - Each unit is resampled independently, so the correlation of the
       data in time is not considered. The stdev can be underestimated
       for strongly correlated data.
     - The stdev is large near both ends of the period and where the
       data are sparse. ensmean\_trend differs from the trend with all
       data there.
-    - It takes about 35 seconds for 1000 members with 1265 days of data.
+    - It takes about 40 seconds for 1000 members with 1265 days of data
+      (the leverage takes about half of it for the wild bootstrap).
+
+Wu, C. F. J. (1986), Jackknife, bootstrap and other resampling methods in regression analysis. Ann. Statist., 14(4): 1261-1295.
+
+Liu, R. Y. (1988), Bootstrap procedures under some non-i.i.d. models. Ann. Statist., 16(4): 1696-1708.
 
 Shao, J. and Wu, C. F. J. (1989), A general theory for jackknife variance estimation. Ann. Statist., 17(3): 1176-1197.
+
+Davison, A. C. and Hinkley, D. V. (1997), Bootstrap Methods and their Application. Cambridge University Press.
 
 # Release Notes
 
