@@ -170,6 +170,27 @@ Davison, A. C. and Hinkley, D. V. (1997), Bootstrap Methods and their Applicatio
 
 # Release Notes
 
+## 2026-11-11
+
+- Version 1.3.0
+- bootstrap() uses the wild bootstrap of the residuals by default
+  (method="wild", see "Uncertainty by bootstrap" above). The stdev of
+  boot\_all.txt and boot\_annual.txt changes (about 12% smaller on
+  average for the sample data).
+    - The method of version 1.2.0 is a delete-d jackknife, not a
+      bootstrap: the duplicated data of a resampling are averaged in
+      the same day, so it ends up excluding data at random. It is kept
+      as method="jackknife" (--method jackknife), and gives the same
+      results as version 1.2.0.
+    - The wild bootstrap keeps the days of the data and flips the
+      residuals about the smooth curve at random, scaled by
+      1/sqrt(1-h) with the leverage h. The stdev agrees with the
+      analytic value within 1% on average.
+- fit(data, reject=False) fits the data with flag 0 without the
+  rejection of outliers. The flags of the data used for the result are
+  kept in fit\_qf.
+- The results of fit() and the other output files do not change.
+
 ## 2026-11-08
 
 - Version 1.2.0
