@@ -51,10 +51,13 @@ class N97Fit:
     eff_data: pd.DataFrame = None
     fit_result: pd.DataFrame = None
     input_data: pd.DataFrame = None
+    fit_qf: np.ndarray = None
+    data_period: tuple = None
     boot_result: pd.DataFrame = None
     boot_smooth: np.ndarray = None
     boot_trend: np.ndarray = None
     boot_growthrate: np.ndarray = None
+    boot_leverage: pd.DataFrame = None
     boot_info: dict = None
 
     extrap_days: int = 30
@@ -95,11 +98,18 @@ class N97Fit:
 
         logger.setLevel(loglevel)
 
-    def fit(self, data: pd.DataFrame):
+    def fit(self, data: pd.DataFrame, reject: bool = True, _period: tuple = None):
         """Execute fitting
 
         Args:
             data (pd.DataFrame): Input data
+            reject (bool): If False, no data are rejected as outliers; the
+                data with flag 0 are fitted as they are, and the result
+                is linear in their values (used by bootstrap()).
+            _period (tuple): (internal) the first and last day and t of the
+                data that set the 1-day grid. bootstrap() gives those of
+                the fit with all data, so that the members are fitted on
+                the same grid.
         Returns:
             pd.DataFrame: Fitting result
         """
@@ -130,11 +140,13 @@ class N97Fit:
         )
 
         # if individual value is out of sdev*pl_sigma, set to 2
-        ij, i = flatten_ijmap(ijmap, ijdata)
-        sgm_allow = ysdev[i] * pl_sigma
-        sumcnt = reviseflags(
-            flag, ij, rawy[ij] - y[i], sgm_allow, mask=ysdev[i] != 0
-        )
+        sumcnt = 0
+        if reject:
+            ij, i = flatten_ijmap(ijmap, ijdata)
+            sgm_allow = ysdev[i] * pl_sigma
+            sumcnt = reviseflags(
+                flag, ij, rawy[ij] - y[i], sgm_allow, mask=ysdev[i] != 0
+            )
 
         logger.info("")
         logger.info(" *** Reject irregular data in same day ***")
@@ -149,17 +161,22 @@ class N97Fit:
             pl_avgday, rawt, rawd, rawy, flag, asarray=True
         )
 
+        # period of the data, which sets the 1-day grid
+        if _period is None:
+            _period = (int(d[0]), int(d[ndata - 1]), float(t[0]), float(t[ndata - 1]))
+        d_first, d_last, t_first, t_last = _period
+
         logger.info("")
         logger.info(" Average interval of the day : %8d", int(dt * self.days_in_year))
-        logger.info(" Start day                   : %8d", d[0])
-        logger.info(" End day                     : %8d", d[ndata - 1])
-        logger.info(" Start t                     : %8.4f", t[0])
-        logger.info(" End t                       : %8.4f", t[ndata - 1])
+        logger.info(" Start day                   : %8d", d_first)
+        logger.info(" End day                     : %8d", d_last)
+        logger.info(" Start t                     : %8.4f", t_first)
+        logger.info(" End t                       : %8.4f", t_last)
 
         # *** Stage 1-4 : Prepare extended (and interpolated) t (= x) *** !
 
-        xstart = d[0] - 910
-        xend = d[ndata - 1] + 2920
+        xstart = d_first - 910
+        xend = d_last + 2920
         xdata = xend - xstart + 1
 
         x_d = np.zeros(xdata, dtype=np.int64)
@@ -174,10 +191,10 @@ class N97Fit:
         x_t[:] = ((x_d - sdate).astype(np.float64) + 0.5) / self.days_in_year
 
         # last grid point within day_interval
-        idx = np.nonzero(np.abs(x_t - t[0]) <= self.day_interval)[0]
+        idx = np.nonzero(np.abs(x_t - t_first) <= self.day_interval)[0]
         if idx.size:
             tstart = idx[-1]
-        idx = np.nonzero(np.abs(x_t - t[ndata - 1]) <= self.day_interval)[0]
+        idx = np.nonzero(np.abs(x_t - t_last) <= self.day_interval)[0]
         if idx.size:
             tend = idx[-1]
 
@@ -200,7 +217,7 @@ class N97Fit:
 
         # *** Stage 1 : END ***
 
-        if sw_iteration == 1:
+        if sw_iteration == 1 and reject:
             itelim = 5
         else:
             itelim = 1
@@ -289,7 +306,7 @@ class N97Fit:
                     sgm_temp = sgm_hmsp
 
                 # *** Stage 2-3 : Judge the flags and re-allocate 2D data *** !
-                if iteration >= 1:
+                if iteration >= 1 or not reject:
                     logger.info("")
                     logger.info(" =>Skip Judgement in this Stage...")
                     break
@@ -316,6 +333,9 @@ class N97Fit:
             # *** Stage 2 : END ***
 
             # * * * Stage 3 : Apply the butterworth filter (hi and low) to the remained deviation * * *  !
+
+            # flags of the data used for the result
+            fit_qf = flag.copy()
 
             # Smooth spline
             spline = smooth(ndata, t, de_hm, rm)
@@ -542,7 +562,7 @@ class N97Fit:
             sgm_allow = sgm_sphmlohi * pl_sigma
             sumcnt = 0
 
-            if sw_iteration == 1:
+            if sw_iteration == 1 and reject:
                 # Judge by using averaged
                 ij, i = flatten_ijmap(ijmap, ijdata)
                 sumcnt += reviseflags(flag, ij, de_sphmlohi[i], sgm_allow)
@@ -576,7 +596,7 @@ class N97Fit:
         t_tr = matching(rawndata, rawt, xdata, x_t, x_tr, self.day_interval)
         t_ss = matching(rawndata, rawt, xdata, x_t, x_ss, self.day_interval)
 
-        if sw_iteration == 0:
+        if sw_iteration == 0 and reject:
             dev       = rawy - t_tt
             sgm_all   = np.std(dev[flag == 0])
             sgm_allow = sgm_all * pl_sigma
@@ -594,6 +614,8 @@ class N97Fit:
             logger.info("")
 
         self.syear = syear
+        self.fit_qf = fit_qf
+        self.data_period = _period
         self.trange = (tstart, tend + 1)
         self.nh = nh
         self.hm_coef = hm_coef
@@ -660,6 +682,7 @@ class N97Fit:
         self.boot_smooth = None
         self.boot_trend = None
         self.boot_growthrate = None
+        self.boot_leverage = None
         self.boot_info = None
 
         return self.fit_result
@@ -667,33 +690,50 @@ class N97Fit:
     def bootstrap(
         self,
         nboot: int = 1000,
+        method: str = "wild",
         exclude_frac: float = 0.5,
         seed: int = 0,
     ) -> pd.DataFrame:
-        """Uncertainty of the fitting result by bootstrap
+        """Uncertainty of the fitting result by resampling
 
-        The data are thinned out at random and fitted again, nboot times.
-        The unit of thinning is the "Range of day" group (the day with
-        avgday=1) of the effective data. In each member, a fraction
+        The data are resampled and fitted again, nboot times, and the
+        standard deviation over the members at each day is the uncertainty
+        (stdev) of the fitting result with all data. The unit of resampling
+        is the "Range of day" group (the day with avgday=1) of the data
+        used for the fit with all data.
+
+        method="wild" (default): wild bootstrap of the residuals (Wu, 1986;
+        Liu, 1988; Davison and Hinkley, 1997). The days of the data are kept,
+        and the residuals about the smooth curve s are flipped at random:
+            y*_j = s_j + v_i * (y_j - s_j) / sqrt(1 - h_i)
+        for each data j of unit i, where v_i = +1 or -1 with probability
+        1/2 (Rademacher) and h_i is the leverage of the smooth curve (the
+        change of the smooth curve at unit i when the data of unit i are
+        increased by 1). The members are fitted without the rejection of
+        outliers, so that the fit is linear in y. The leverage needs as many
+        fits as the units. Dividing by sqrt(1 - h_i) (h_i <= 0.99) undoes
+        the shrinkage of the residuals about the fitted curve.
+
+        method="jackknife": delete-d jackknife. In each member, a fraction
         exclude_frac of the units (round(exclude_frac * number of units))
         are excluded (flag -1), and fit() is run with the same parameters,
-        including the outlier rejection. The smooth curve, the trend and
-        the growth rate of each member are taken in the range where fit()
-        gives its result (the data period +- extrap_days).
+        including the rejection of outliers. The stdev is multiplied by
+        sqrt((1-f)/f) (Shao and Wu, 1989), which makes it nearly independent
+        of f, and is 1 at f=0.5. f is the actual fraction of the excluded
+        units. The jackknife also includes the variation by the days of
+        the data, and gives a larger stdev than the wild bootstrap.
 
-        The standard deviation over the members at each day, multiplied
-        by the delete-d jackknife factor sqrt((1-f)/f) (Shao and Wu, 1989),
-        is the uncertainty (stdev) of the fitting result with all data.
-        The factor makes it nearly independent of f, and is 1 at f=0.5.
-        f is the actual fraction of the excluded units (e.g. 0.4996 for
-        exclude_frac=0.5 and 1265 units).
+        The smooth curve, the trend and the growth rate of each member are
+        taken in the range where fit() gives its result (the data period
+        +- extrap_days).
 
         Run fit() first. The results are in boot_all() and boot_annual().
 
         Args:
             nboot (int): number of members (default: 1000)
-            exclude_frac (float): fraction of the excluded units,
-                0 < exclude_frac < 1 (default: 0.5)
+            method (str): "wild" (default) or "jackknife"
+            exclude_frac (float): jackknife only. Fraction of the excluded
+                units, 0 < exclude_frac < 1 (default: 0.5)
             seed (int): random seed (default: 0). If None, 128-bit entropy
                 is drawn from the OS. The seed is logged and kept in
                 boot_info.
@@ -702,42 +742,35 @@ class N97Fit:
             pd.DataFrame: stdev at each day of the result range
                 - d: day (see date2cday)
                 - stdev_value, stdev_trend, stdev_growthrate: stdev of
-                  smooth, trend and growthrate (corrected by the factor)
+                  smooth, trend and growthrate
                 - ensmean_trend: mean of the trend over the members
                 - nboot: number of members covering the day
 
         The smooth curve, the trend and the growth rate of each member are
         kept in boot_smooth, boot_trend and boot_growthrate (nboot x days,
-        NaN out of the range).
+        NaN out of the range). For the wild bootstrap, the leverage of each
+        unit is kept in boot_leverage.
         """
 
         if self.fit_result is None:
             raise ValueError("No data. Run fit() first.")
         if nboot < 2:
             raise ValueError(f"nboot must be 2 or more: {nboot}")
+        if method not in ("wild", "jackknife"):
+            raise ValueError(f"method must be 'wild' or 'jackknife': {method!r}")
 
         loglevel = logger.level
         start = time.perf_counter()
 
-        # units: "Range of day" groups of the effective data, as ijmapping
-        data = self.input_data
-        pre = self.preprocess(data)
-        qf = pre["qf"].to_numpy(copy=True)
-        rawd = pre["d"].to_numpy()
-        valid = np.flatnonzero(qf == 0)
-        d_group = (rawd - rawd.min()) // self.avgday
-        _, unit = np.unique(d_group[valid], return_inverse=True)
-        unit = unit.ravel()
-        nunit = int(unit.max()) + 1
-
-        exclude_frac = check_exclude_frac(exclude_frac, nunit)
         rng, entropy = make_rng(seed)
 
         logger.info("")
         logger.info(" * * * * * Start Bootstrap * * * * *")
+        logger.info(
+            " Method                      : %s",
+            "wild bootstrap" if method == "wild" else "delete-d jackknife",
+        )
         logger.info(" Number of members           : %8d", nboot)
-        logger.info(" Number of data units        : %8d", nunit)
-        logger.info(" Fraction of excluded units  : %8s", exclude_frac)
         logger.info(" Random generator            : PCG64DXSM")
         logger.info(" Seed                        : %s", entropy)
 
@@ -752,60 +785,41 @@ class N97Fit:
         a_sm = np.full((nboot, nwin), np.nan)
         a_tr = np.full((nboot, nwin), np.nan)
         a_gr = np.full((nboot, nwin), np.nan)
-        a_frac = np.zeros(nboot)
 
-        member_data = data.copy()
-        excluded = np.zeros(nunit, dtype=bool)
-        nreport = max(nboot // 10, 1)
+        def take(k, member):
+            # result range of the member, on the days of win_d
+            mslice = slice(
+                member.trange[0] - int(member.extrap_days),
+                member.trange[1] + int(member.extrap_days),
+            )
+            mfit = member.fit_result.iloc[mslice]
+            idx = mfit["d"].to_numpy() - win_d[0]
+            sel = (idx >= 0) & (idx < nwin)
+            a_sm[k, idx[sel]] = mfit["smooth"].to_numpy()[sel]
+            a_tr[k, idx[sel]] = mfit["trend"].to_numpy()[sel]
+            a_gr[k, idx[sel]] = mfit["growthrate"].to_numpy()[sel]
+
+        def report(label, k, n):
+            if (k + 1) % max(n // 10, 1) == 0 or k + 1 == n:
+                logger.setLevel(loglevel)
+                logger.info(
+                    " +%-8s %6d / %d  (%7.1f s)",
+                    label,
+                    k + 1,
+                    n,
+                    time.perf_counter() - start,
+                )
+                logger.setLevel("WARNING")
 
         try:
-            for k in range(nboot):
-                excl = exclude_units(rng, nunit, exclude_frac)
-                a_frac[k] = len(excl) / nunit
-
-                excluded[:] = False
-                excluded[excl] = True
-                member_qf = qf.copy()
-                member_qf[valid[excluded[unit]]] = -1
-                member_data["qf"] = member_qf
-
-                member = N97Fit(
-                    avgday=self.avgday,
-                    sigma=self.sigma,
-                    nhm=self.nhm,
-                    cutlo=self.cutlo,
-                    orderlo=self.orderlo,
-                    orderhi=self.orderhi,
-                    sw_iteration=self.sw_iteration,
-                    loglevel="WARNING",
-                )
-                member.fit(member_data)
-
-                # result range of the member, on the days of win_d
-                mslice = slice(
-                    member.trange[0] - int(member.extrap_days),
-                    member.trange[1] + int(member.extrap_days),
-                )
-                mfit = member.fit_result.iloc[mslice]
-                idx = mfit["d"].to_numpy() - win_d[0]
-                sel = (idx >= 0) & (idx < nwin)
-                a_sm[k, idx[sel]] = mfit["smooth"].to_numpy()[sel]
-                a_tr[k, idx[sel]] = mfit["trend"].to_numpy()[sel]
-                a_gr[k, idx[sel]] = mfit["growthrate"].to_numpy()[sel]
-
-                if (k + 1) % nreport == 0 or k + 1 == nboot:
-                    logger.setLevel(loglevel)
-                    logger.info(
-                        " +Member %6d / %d  (%7.1f s)",
-                        k + 1,
-                        nboot,
-                        time.perf_counter() - start,
-                    )
+            if method == "wild":
+                info = self._wild_bootstrap(nboot, rng, take, report)
+            else:
+                info = self._jackknife(nboot, rng, exclude_frac, take, report)
         finally:
             logger.setLevel(loglevel)
 
-        frac = float(a_frac.mean())
-        scale = float(jackknife_scale(frac))
+        scale = info["scale"]
 
         # days covered by no member (or one) give NaN (or 0) silently
         with warnings.catch_warnings():
@@ -818,14 +832,7 @@ class N97Fit:
         self.boot_smooth = a_sm
         self.boot_trend = a_tr
         self.boot_growthrate = a_gr
-        self.boot_info = {
-            "nboot": nboot,
-            "exclude_frac": exclude_frac,
-            "frac": frac,
-            "scale": scale,
-            "nunit": nunit,
-            "seed": entropy,
-        }
+        self.boot_info = {"method": method, "nboot": nboot, "seed": entropy, **info}
         self.boot_result = pd.DataFrame(
             {
                 "d": win_d,
@@ -838,11 +845,150 @@ class N97Fit:
         )
 
         logger.info("")
-        logger.info(" Mean fraction of excluded   : %8.4f", frac)
-        logger.info(" Stdev factor sqrt((1-f)/f)  : %8.4f", scale)
+        if method == "wild":
+            logger.info(" Mean of leverage            : %8.4f", info["leverage_mean"])
+            logger.info(" Max of leverage             : %8.4f", info["leverage_max"])
+            logger.info(" Effective degree of freedom : %8.1f", info["edf"])
+        else:
+            logger.info(" Mean fraction of excluded   : %8.4f", info["frac"])
+            logger.info(" Stdev factor sqrt((1-f)/f)  : %8.4f", scale)
         logger.info(" * * * * * End Bootstrap * * * * *")
 
         return self.boot_result
+
+    def _member(self) -> "N97Fit":
+        """N97Fit with the same parameters, for the members of bootstrap()"""
+        return N97Fit(
+            avgday=self.avgday,
+            sigma=self.sigma,
+            nhm=self.nhm,
+            cutlo=self.cutlo,
+            orderlo=self.orderlo,
+            orderhi=self.orderhi,
+            sw_iteration=self.sw_iteration,
+            loglevel="WARNING",
+        )
+
+    def _units(self, rawd: np.ndarray, rows: np.ndarray):
+        """"Range of day" group (unit) of each row, as ijmapping
+
+        Returns:
+            (np.ndarray, int): unit of each of rows (0 to nunit-1), nunit
+        """
+        d_group = (rawd - rawd.min()) // self.avgday
+        _, unit = np.unique(d_group[rows], return_inverse=True)
+        unit = unit.ravel()
+        return unit, int(unit.max()) + 1
+
+    def _wild_bootstrap(self, nboot, rng, take, report) -> dict:
+        """Members of the wild bootstrap (see bootstrap())"""
+
+        data = self.input_data
+        rawd = self.raw_data["d"].to_numpy()
+        y = self.raw_data["value"].to_numpy(dtype=np.float64)
+        s = self.raw_data["smooth"].to_numpy()
+
+        # data used for the fit with all data, and their units
+        used = np.flatnonzero(self.fit_qf == 0)
+        unit, nunit = self._units(rawd, used)
+        nrow = np.bincount(unit, minlength=nunit)
+
+        def smooth_of_units(member):
+            sm = member.raw_data["smooth"].to_numpy()[used]
+            return np.bincount(unit, weights=sm, minlength=nunit) / nrow
+
+        member_data = data.copy()
+        member_data["qf"] = self.fit_qf
+
+        def refit(values):
+            member_data["value"] = values
+            member = self._member()
+            member.fit(member_data, reject=False, _period=self.data_period)
+            return member
+
+        logger.info(" Number of data units        : %8d", nunit)
+        logger.setLevel("WARNING")
+
+        # leverage of each unit (the fit is linear in y without rejection,
+        # and reproduces the fit with all data)
+        s_unit = np.bincount(unit, weights=s[used], minlength=nunit) / nrow
+        h = np.empty(nunit)
+        for i in range(nunit):
+            y1 = y.copy()
+            y1[used[unit == i]] += 1.0
+            h[i] = smooth_of_units(refit(y1))[i] - s_unit[i]
+            report("Leverage", i, nunit)
+
+        # residuals about the smooth curve, enlarged by 1/sqrt(1-h)
+        r_adj = (y[used] - s[used]) / np.sqrt(1.0 - np.minimum(h, 0.99))[unit]
+
+        for k in range(nboot):
+            v = rng.choice([-1.0, 1.0], size=nunit)
+            y_star = y.copy()
+            y_star[used] = s[used] + v[unit] * r_adj
+            take(k, refit(y_star))
+            report("Member", k, nboot)
+
+        first = np.unique(unit, return_index=True)[1]
+        self.boot_leverage = pd.DataFrame(
+            {
+                "d": rawd[used[first]],
+                "value": np.bincount(unit, weights=y[used], minlength=nunit) / nrow,
+                "smooth": s_unit,
+                "leverage": h,
+            }
+        )
+
+        return {
+            "scale": 1.0,
+            "nunit": nunit,
+            "leverage_mean": float(h.mean()),
+            "leverage_max": float(h.max()),
+            "edf": float(h.sum()),
+        }
+
+    def _jackknife(self, nboot, rng, exclude_frac, take, report) -> dict:
+        """Members of the delete-d jackknife (see bootstrap())"""
+
+        data = self.input_data
+
+        # units: "Range of day" groups of the effective data, as ijmapping
+        pre = self.preprocess(data)
+        qf = pre["qf"].to_numpy(copy=True)
+        valid = np.flatnonzero(qf == 0)
+        unit, nunit = self._units(pre["d"].to_numpy(), valid)
+
+        exclude_frac = check_exclude_frac(exclude_frac, nunit)
+        logger.info(" Number of data units        : %8d", nunit)
+        logger.info(" Fraction of excluded units  : %8s", exclude_frac)
+        logger.setLevel("WARNING")
+
+        a_frac = np.zeros(nboot)
+        member_data = data.copy()
+        excluded = np.zeros(nunit, dtype=bool)
+
+        for k in range(nboot):
+            excl = exclude_units(rng, nunit, exclude_frac)
+            a_frac[k] = len(excl) / nunit
+
+            excluded[:] = False
+            excluded[excl] = True
+            member_qf = qf.copy()
+            member_qf[valid[excluded[unit]]] = -1
+            member_data["qf"] = member_qf
+
+            member = self._member()
+            member.fit(member_data)
+            take(k, member)
+            report("Member", k, nboot)
+
+        frac = float(a_frac.mean())
+        return {
+            "scale": float(jackknife_scale(frac)),
+            "nunit": nunit,
+            "exclude_frac": exclude_frac,
+            "frac": frac,
+        }
 
     def preprocess(
         self, data: pd.DataFrame, inplace: bool = False, asarray: bool = False
@@ -1290,9 +1436,10 @@ class N97Fit:
             - ave_gr: trend(Jan 1 of the next year) - trend(Jan 1)
             - stdev_gr: stdev of ave_gr by bootstrap
 
-        The stdev is that of the annual values of the members, multiplied
-        by the factor sqrt((1-f)/f) (see bootstrap()). The members that do
-        not cover the whole year (or both Jan 1) are not used.
+        The stdev is that of the annual values of the members (multiplied
+        by the factor sqrt((1-f)/f) for the jackknife, see bootstrap()).
+        The members that do not cover the whole year (or both Jan 1) are
+        not used.
 
         Returns:
             pd.DataFrame: annual values
